@@ -6,16 +6,16 @@
 <title>Monitor de Emergencias · España / Andalucía · Incendios Forestales</title>
 <!--
   MONITOR DE EMERGENCIAS — adaptación didáctica del concepto de koala73/worldmonitor
-  para el Ciclo de Emergencias y Protección Civil (módulo de Intervención Operativa).
+  y de incendiosespaña.es para el Ciclo de Emergencias y Protección Civil.
 
-  Qué se conserva de worldmonitor: mapa con capas conmutables, panel de noticias por
-  categoría, panel de estado por fuente, auto-refresco, fuente NASA EONET (incendios).
-  Qué se descarta: mercados, cripto, militar, ciber, puertos, backend propio (Vercel/Convex).
-  Qué se añade: EFFIS/Copernicus, IGN, MeteoAlarm (AEMET), Open-Meteo (regla 30-30-30),
-  Google News RSS segmentado y cuentas oficiales de X.
+  v2: focos NASA FIRMS como puntos (FRP + confianza), aviso de proximidad,
+  puntos de agua / parques de bomberos / bases forestales / helipuertos /
+  núcleos de población vía OpenStreetMap-Overpass, límites municipales IGN,
+  perímetros de área quemada EFFIS y municipios declarados geocodificados.
 
-  Todo se ejecuta en el navegador. Los feeds RSS pasan por proxies CORS públicos con
-  cadena de respaldo. Ver README.md de esta carpeta para el detalle de fuentes.
+  Todo se ejecuta en el navegador, sin backend. Los RSS pasan por proxies CORS
+  públicos con cadena de respaldo. Ver README.md para el detalle de fuentes.
+  ESTE MONITOR NO SUSTITUYE A LOS SISTEMAS OFICIALES DE EMERGENCIA (112).
 -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -30,12 +30,15 @@
   *{box-sizing:border-box; margin:0; padding:0;}
   body{background:var(--bg); color:var(--ink); font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; font-size:14px; height:100vh; display:flex; flex-direction:column; overflow:hidden;}
 
-  header{display:flex; align-items:center; gap:12px; padding:8px 14px; background:var(--panel); border-bottom:1px solid var(--border); flex-wrap:wrap;}
+  header{display:flex; align-items:center; gap:10px; padding:8px 14px; background:var(--panel); border-bottom:1px solid var(--border); flex-wrap:wrap;}
   header h1{font-size:15px; font-weight:700; letter-spacing:.3px;}
   header h1 span{color:var(--accent);}
   .badge-n3{background:var(--critical-bg); color:var(--critical); border:1px solid var(--critical); border-radius:6px; padding:3px 10px; font-weight:700; font-size:12px; animation:pulse 2s infinite;}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
   .badge-info{background:var(--panel2); color:var(--ink2); border:1px solid var(--border); border-radius:6px; padding:3px 8px; font-size:11px;}
+  #firms-count{color:var(--serious); font-weight:700;}
+  #prox-chip{cursor:pointer;}
+  #prox-chip.alerta{background:var(--critical-bg); color:var(--critical); border-color:var(--critical); animation:pulse 1.2s infinite;}
   #clock{margin-left:auto; font-variant-numeric:tabular-nums; color:var(--ink2); font-size:12px;}
   #btn-refresh{background:var(--panel2); color:var(--ink); border:1px solid var(--border); border-radius:6px; padding:4px 12px; cursor:pointer; font-size:12px;}
   #btn-refresh:hover{border-color:var(--accent);}
@@ -66,6 +69,13 @@
   .sev-green{background:var(--ok-bg); color:var(--ok); border:1px solid var(--ok);}
   .zona{font-size:10px; color:var(--ink3); border:1px solid var(--border); border-radius:4px; padding:1px 5px; margin-left:4px;}
 
+  /* Municipios afectados (chips) */
+  #muni-box{padding:8px 12px; border-bottom:1px solid var(--border); background:var(--panel2);}
+  #muni-box h4{font-size:11px; color:var(--ink2); text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px;}
+  .chip{display:inline-block; margin:2px 4px 2px 0; padding:2px 9px; border-radius:12px; font-size:12px; font-weight:600; cursor:pointer; border:1px solid var(--critical); color:var(--critical); background:var(--critical-bg);}
+  .chip.manual{border-color:var(--serious); color:var(--serious); background:var(--serious-bg);}
+  .chip:hover{filter:brightness(1.3);}
+
   /* Rejilla 30-30-30 */
   .grid-3030{display:grid; grid-template-columns:1fr 1fr; gap:8px; padding:10px;}
   .tile{background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:8px 10px;}
@@ -78,6 +88,7 @@
   .e-grave{background:var(--serious-bg); color:var(--serious);}
   .e-critico{background:var(--critical-bg); color:var(--critical);}
   .nota{padding:8px 12px; font-size:11px; color:var(--ink3); line-height:1.4;}
+  .nota a{color:var(--accent);}
   .exceed{color:var(--critical); font-weight:700;}
 
   /* Cuentas X */
@@ -87,14 +98,20 @@
   .xacc span{color:var(--ink3); font-size:11px;}
 
   /* Estado de fuentes */
-  footer{display:flex; gap:14px; flex-wrap:wrap; padding:5px 14px; background:var(--panel); border-top:1px solid var(--border); font-size:11px; color:var(--ink2);}
+  footer{display:flex; gap:14px; flex-wrap:wrap; align-items:center; padding:5px 14px; background:var(--panel); border-top:1px solid var(--border); font-size:11px; color:var(--ink2);}
   .st{display:inline-flex; align-items:center; gap:5px;}
   .dot{width:8px; height:8px; border-radius:50%; background:var(--ink3);}
   .dot.ok{background:var(--ok);} .dot.err{background:var(--critical);} .dot.load{background:var(--warn); animation:pulse 1s infinite;}
+  .disclaimer{margin-left:auto; color:var(--ink3); font-style:italic;}
+
+  /* Leyenda FIRMS sobre el mapa */
+  .leyenda{background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:8px 10px; font-size:11px; color:var(--ink2); line-height:1.5; max-width:210px;}
+  .leyenda b{color:var(--ink);}
+  .lg-dot{display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; vertical-align:-1px;}
 
   .leaflet-container{font:inherit;}
   .leaflet-popup-content-wrapper,.leaflet-popup-tip{background:var(--panel2); color:var(--ink);}
-  .leaflet-control-layers{background:var(--panel2); color:var(--ink); border:1px solid var(--border);}
+  .leaflet-control-layers{background:var(--panel2); color:var(--ink); border:1px solid var(--border); max-height:70vh; overflow-y:auto;}
   .leaflet-control-layers-expanded{padding:8px 10px; font-size:12px;}
   .leaflet-bar a{background:var(--panel2); color:var(--ink); border-color:var(--border);}
 </style>
@@ -104,7 +121,8 @@
 <header>
   <h1>🛰️ Monitor de Emergencias · <span>España / Andalucía</span></h1>
   <span class="badge-n3" id="banner-situacion">⚠ NIVEL 3 · Incendios forestales · C. de Madrid</span>
-  <span class="badge-info">Ejercicio — Módulo de Intervención Operativa</span>
+  <span class="badge-info">🔥 <span id="firms-count">–</span> focos 24 h</span>
+  <span class="badge-info" id="prox-chip" title="Activa la vigilancia de proximidad a focos">📍 Vigilar mi posición</span>
   <span id="clock">--:--:--</span>
   <button id="btn-refresh">↻ Actualizar todo</button>
 </header>
@@ -122,7 +140,13 @@
       <button data-pane="p-sismos">🌍 Sismos</button>
       <button data-pane="p-x">𝕏 Oficiales</button>
     </nav>
-    <div class="tabpane active" id="p-madrid"><div class="empty">Cargando noticias…</div></div>
+    <div class="tabpane active" id="p-madrid">
+      <div id="muni-box" hidden>
+        <h4>🚩 Municipios afectados/declarados (clic para ir en el mapa)</h4>
+        <div id="muni-chips"></div>
+      </div>
+      <div id="news-madrid"><div class="empty">Cargando noticias…</div></div>
+    </div>
     <div class="tabpane" id="p-andalucia"><div class="empty">Cargando noticias…</div></div>
     <div class="tabpane" id="p-pcivil"><div class="empty">Cargando noticias…</div></div>
     <div class="tabpane" id="p-avisos"><div class="empty">Cargando avisos MeteoAlarm/AEMET…</div></div>
@@ -137,23 +161,38 @@
   </aside>
 </main>
 
-<footer id="status-bar"></footer>
+<footer id="status-row">
+  <span id="status-bar" style="display:contents"></span>
+  <span class="disclaimer">No sustituye a los sistemas oficiales de emergencia · en emergencia llama al 112</span>
+</footer>
 
 <script>
 'use strict';
 /* ================= CONFIGURACIÓN (editable) ================= */
 const CONFIG = {
-  // Encuadre peninsular + Canarias fuera; bbox usado para EONET y sismos
   bbox: { minLat: 35.0, maxLat: 44.5, minLon: -9.9, maxLon: 4.6 },
-  mapCenter: [39.6, -4.2], mapZoom: 6,
-  refreshNewsMin: 5, refreshDataMin: 10,
-  // Consultas de Google News RSS por panel (editables según evolucione la emergencia)
+  mapCenter: [40.2, -4.0], mapZoom: 7,
+  refreshNewsMin: 5, refreshDataMin: 10, refreshFirmsMin: 5,
+
+  /* Clave gratuita de NASA FIRMS (https://firms.modaps.eosdis.nasa.gov/api/map_key/).
+     Es una clave de solo lectura de datos públicos, con límite propio de peticiones. */
+  firmsKey: '97d4f07c5c643a1e98d22228e462846a',
+  firmsSources: ['VIIRS_NOAA21_NRT', 'VIIRS_NOAA20_NRT', 'VIIRS_SNPP_NRT'],
+  firmsDays: 1,
+
+  alertKm: 25,   // radio del aviso de proximidad a focos
+
   queries: {
     madrid: 'incendio forestal Madrid OR "nivel 3" OR INFOMA OR Guadarrama when:2d',
     andalucia: 'incendio Andalucía OR INFOCA OR "112 Andalucía" when:3d',
     pcivil: '"protección civil" OR UME OR evacuación emergencia España when:1d',
   },
-  // Puntos de vigilancia meteorológica (regla 30-30-30)
+
+  /* Municipios declarados MANUALMENTE por el operador (p. ej. leídos en el X de la
+     Delegación del Gobierno — X no ofrece API pública, así que se transcriben aquí,
+     como en un CECOP real). Admite "Municipio" o "Municipio, Provincia". */
+  municipiosDeclarados: [],
+
   locs: [
     { n: 'Madrid capital',        lat: 40.42, lon: -3.70, zona: 'MAD' },
     { n: 'Sierra de Guadarrama',  lat: 40.74, lon: -4.06, zona: 'MAD' },
@@ -168,6 +207,28 @@ const CONFIG = {
   ],
   zonasInteres: /madrid|guadarrama|sevilla|c[oó]rdoba|granada|m[aá]laga|c[aá]diz|huelva|ja[eé]n|almer[ií]a|andaluc/i,
 };
+
+/* Municipios de la C. de Madrid para detección automática en titulares (no exhaustivo:
+   cubre sierra y municipios relevantes; añade los que falten). "Madrid" capital se
+   excluye para no marcar cada titular. */
+const MUNI_MADRID = [
+  'Alcalá de Henares','Alcobendas','Alcorcón','Algete','Alpedrete','Aranjuez','Arganda del Rey',
+  'Becerril de la Sierra','Boadilla del Monte','Braojos','Buitrago del Lozoya','Bustarviejo',
+  'Cadalso de los Vidrios','Canencia','Cenicientos','Cercedilla','Chapinería','Chinchón','Ciempozuelos',
+  'Collado Mediano','Collado Villalba','Colmenar de Oreja','Colmenar del Arroyo','Colmenar Viejo','Colmenarejo',
+  'Coslada','El Boalo','El Escorial','El Molar','El Vellón','Fresnedillas de la Oliva','Fuenlabrada',
+  'Galapagar','Garganta de los Montes','Gargantilla del Lozoya','Getafe','Guadalix de la Sierra','Guadarrama',
+  'Hoyo de Manzanares','La Cabrera','Las Rozas','Leganés','Loeches','Lozoya','Lozoyuela','Majadahonda',
+  'Manzanares el Real','Mataelpino','Meco','Mejorada del Campo','Miraflores de la Sierra','Montejo de la Sierra',
+  'Móstoles','Navacerrada','Navalafuente','Navalagamella','Navalcarnero','Navas del Rey','Nuevo Baztán',
+  'Paracuellos de Jarama','Parla','Patones','Pedrezuela','Pelayos de la Presa','Pinto','Pozuelo de Alarcón',
+  'Quijorna','Rascafría','Robledo de Chavela','Rozas de Puerto Real','San Agustín del Guadalix',
+  'San Fernando de Henares','San Lorenzo de El Escorial','San Martín de la Vega','San Martín de Valdeiglesias',
+  'San Sebastián de los Reyes','Santa María de la Alameda','Sevilla la Nueva','Somosierra','Soto del Real',
+  'Talamanca de Jarama','Torrejón de Ardoz','Torrelaguna','Torrelodones','Tres Cantos','Valdemaqueda',
+  'Valdemorillo','Valdemoro','Valdetorres de Jarama','Venturada','Villa del Prado','Villalbilla','Villamanta',
+  'Villanueva de la Cañada','Villanueva del Pardillo','Villaviciosa de Odón','Villarejo de Salvanés','Zarzalejo',
+];
 
 /* Cuentas oficiales en X (enlaces directos; X no ofrece RSS público) */
 const X_ACCOUNTS = [
@@ -195,7 +256,6 @@ const X_ACCOUNTS = [
     ['DGTes', 'DGT'],
   ]],
 ];
-/* Búsquedas en vivo en X (útiles para delegaciones del Gobierno, sin handle estable) */
 const X_SEARCHES = [
   ['"nivel 3" Madrid incendio', '%22nivel%203%22%20Madrid%20incendio'],
   ['Delegación del Gobierno Madrid', '%22Delegaci%C3%B3n%20del%20Gobierno%22%20Madrid'],
@@ -204,16 +264,17 @@ const X_SEARCHES = [
 ];
 
 /* ================= UTILIDADES DE RED ================= */
-/* Cadena de proxies CORS públicos (respaldo si uno cae), como el proxy RSS de worldmonitor
-   pero sin backend propio. Las APIs con CORS abierto (EONET, USGS, Open-Meteo) van directas. */
 const PROXIES = [
   u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
   u => 'https://corsproxy.io/?url=' + encodeURIComponent(u),
   u => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u),
 ];
 
-async function fetchText(url, { proxy = false, timeout = 20000 } = {}) {
-  const targets = proxy ? PROXIES.map(p => p(url)) : [url];
+/* mode: 'direct' (API con CORS abierto) | 'proxy' (RSS sin CORS) | 'auto' (directo y, si falla, proxies) */
+async function fetchText(url, { mode = 'direct', timeout = 20000 } = {}) {
+  const targets = mode === 'proxy' ? PROXIES.map(p => p(url))
+    : mode === 'auto' ? [url, ...PROXIES.map(p => p(url))]
+    : [url];
   let lastErr;
   for (const t of targets) {
     try {
@@ -223,14 +284,13 @@ async function fetchText(url, { proxy = false, timeout = 20000 } = {}) {
       clearTimeout(timer);
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const txt = await r.text();
-      if (txt && txt.length > 50) return txt;
+      if (txt && txt.length > 20) return txt;
       throw new Error('respuesta vacía');
     } catch (e) { lastErr = e; }
   }
   throw lastErr || new Error('sin respuesta');
 }
 
-/* Parseo RSS/Atom tolerante a namespaces */
 function q(el, local) { const r = el.getElementsByTagNameNS('*', local); return r.length ? r[0] : null; }
 function qAll(el, local) { return Array.from(el.getElementsByTagNameNS('*', local)); }
 function txt(el, local) { const n = q(el, local); return n ? n.textContent.trim() : ''; }
@@ -254,19 +314,20 @@ function parseFeed(xmlText) {
 }
 
 const fmtTime = d => d ? new Date(d).toLocaleString('es-ES', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
-const esc = s => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const norm = s => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+function distKm(a, b) {
+  const R = 6371, dLa = (b[0] - a[0]) * Math.PI / 180, dLo = (b[1] - a[1]) * Math.PI / 180;
+  const x = Math.sin(dLa / 2) ** 2 + Math.cos(a[0] * Math.PI / 180) * Math.cos(b[0] * Math.PI / 180) * Math.sin(dLo / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(x));
+}
 
 /* ================= PANEL DE ESTADO POR FUENTE ================= */
 const SOURCES = {};
-function regSource(id, label) {
-  SOURCES[id] = { label, state: 'load', when: null };
-  renderStatus();
-}
+function regSource(id, label) { SOURCES[id] = { label, state: 'load', when: null }; renderStatus(); }
 function setSource(id, state) {
   if (!SOURCES[id]) return;
-  SOURCES[id].state = state;
-  SOURCES[id].when = new Date();
-  renderStatus();
+  SOURCES[id].state = state; SOURCES[id].when = new Date(); renderStatus();
 }
 function renderStatus() {
   document.getElementById('status-bar').innerHTML = Object.values(SOURCES).map(s =>
@@ -287,65 +348,345 @@ const basePNOA = L.tileLayer('https://tms-pnoa-ma.idee.es/1.0.0/pnoa-ma/{z}/{x}/
   { maxZoom: 19, attribution: 'PNOA © IGN' });
 baseDark.addTo(map);
 
-/* Capas EFFIS (Copernicus) — mismas familias de capas que usa el visor oficial */
 const EFFIS = 'https://maps.effis.emergency.copernicus.eu/effis';
 const wmsFWI = L.tileLayer.wms(EFFIS, {
   layers: 'ecmwf007.fwi', format: 'image/png', transparent: true, opacity: 0.55,
-  attribution: 'EFFIS © Copernicus', version: '1.1.1'
-});
+  attribution: 'EFFIS © Copernicus', version: '1.1.1' });
 const wmsHotspots = L.tileLayer.wms(EFFIS, {
   layers: 'modis.hs,viirs.hs', format: 'image/png', transparent: true,
-  attribution: 'Focos MODIS/VIIRS · EFFIS', version: '1.1.1'
-});
+  attribution: 'Focos MODIS/VIIRS · EFFIS', version: '1.1.1' });
 const wmsBurnt = L.tileLayer.wms(EFFIS, {
-  layers: 'modis.ba', format: 'image/png', transparent: true, opacity: 0.8,
-  attribution: 'Área quemada · EFFIS', version: '1.1.1'
-});
-/* Anomalías térmicas VIIRS (NASA GIBS, teselas sin clave — equivalente FIRMS de worldmonitor) */
+  layers: 'modis.ba,viirs.ba', format: 'image/png', transparent: true, opacity: 0.8,
+  attribution: 'Perímetros área quemada · EFFIS', version: '1.1.1' });
+/* Límites municipales — WMS INSPIRE oficial del IGN */
+const wmsMunicipios = L.tileLayer.wms('https://www.ign.es/wms-inspire/unidades-administrativas', {
+  layers: 'AU.AdministrativeBoundary', format: 'image/png', transparent: true, opacity: 0.7,
+  attribution: 'Unidades administrativas © IGN', version: '1.3.0' });
+/* Anomalías térmicas VIIRS con fecha de ayer (la capa "default" puede servir día vacío) */
+const gibsDate = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
 const gibsThermal = L.tileLayer(
-  'https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_NOAA20_Thermal_Anomalies_375m_All/default/default/GoogleMapsCompatible_Level8/{z}/{y}/{x}.png',
+  `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_NOAA20_Thermal_Anomalies_375m_All/default/${gibsDate}/GoogleMapsCompatible_Level8/{z}/{y}/{x}.png`,
   { maxNativeZoom: 8, maxZoom: 12, attribution: 'NASA GIBS/VIIRS' });
 
+const lyrFIRMS = L.layerGroup().addTo(map);
 const lyrEONET = L.layerGroup().addTo(map);
+const lyrMunis = L.layerGroup().addTo(map);
 const lyrQuakes = L.layerGroup();
-wmsHotspots.addTo(map);
+const lyrBomberos = L.layerGroup();
+const lyrAgua = L.layerGroup();
+const lyrHelis = L.layerGroup();
+const lyrNucleos = L.layerGroup();
 
 L.control.layers(
   { 'CARTO oscuro': baseDark, 'OpenStreetMap': baseOSM, 'IGN Base': baseIGN, 'PNOA satélite (IGN)': basePNOA },
   {
-    '🔥 Focos activos MODIS/VIIRS (EFFIS)': wmsHotspots,
-    '🟠 Riesgo de incendio hoy — FWI (EFFIS)': wmsFWI,
-    '⬛ Área quemada temporada (EFFIS)': wmsBurnt,
-    '🛰 Anomalías térmicas VIIRS (NASA)': gibsThermal,
+    '🔥 Focos FIRMS 24 h (FRP/confianza)': lyrFIRMS,
+    '🚩 Municipios afectados/declarados': lyrMunis,
     '📍 Incendios declarados (NASA EONET)': lyrEONET,
+    '🟠 Riesgo de incendio hoy — FWI (EFFIS)': wmsFWI,
+    '🛰 Focos raster MODIS/VIIRS (EFFIS)': wmsHotspots,
+    '⬛ Perímetros área quemada, temporada (EFFIS)': wmsBurnt,
+    '🌡 Anomalías térmicas VIIRS ayer (NASA)': gibsThermal,
+    '🗺 Límites municipales (IGN)': wmsMunicipios,
+    '🚒 Parques de bomberos (OSM)': lyrBomberos,
+    '💧 Puntos de agua forestales (OSM)': lyrAgua,
+    '🚁 Helipuertos (OSM)': lyrHelis,
+    '🏘 Núcleos de población (OSM)': lyrNucleos,
     '🌍 Sismos recientes (IGN/USGS)': lyrQuakes,
   },
-  { collapsed: false }
+  { collapsed: true }
 ).addTo(map);
+
+/* Leyenda de focos FIRMS */
+const legend = L.control({ position: 'bottomleft' });
+legend.onAdd = () => {
+  const d = L.DomUtil.create('div', 'leyenda');
+  d.innerHTML = `<b>Focos FIRMS (24 h)</b><br>
+    Tamaño = potencia radiativa (FRP)<br>
+    <span class="lg-dot" style="background:#ef4444"></span>confianza alta
+    <span class="lg-dot" style="background:#fb923c"></span>nominal
+    <span class="lg-dot" style="background:#fbbf24"></span>baja<br>
+    Opacidad menor = detección &gt; 6 h`;
+  return d;
+};
+legend.addTo(map);
+
+/* ================= FOCOS NASA FIRMS (puntos con FRP y confianza) ================= */
+function parseCSV(text) {
+  const lines = text.trim().split(/\r?\n/);
+  if (lines.length < 2) return [];
+  const head = lines[0].split(',');
+  return lines.slice(1).map(l => {
+    const cells = l.split(','); const o = {};
+    head.forEach((h, i) => o[h] = cells[i]);
+    return o;
+  });
+}
+const CONF_COLOR = { h: '#ef4444', high: '#ef4444', n: '#fb923c', nominal: '#fb923c', l: '#fbbf24', low: '#fbbf24' };
+let firmsPoints = [];   // [{lat,lon,frp,when}] para el aviso de proximidad
+
+async function loadFIRMS() {
+  if (!CONFIG.firmsKey) { setSource('firms', 'err'); return; }
+  setSource('firms', 'load');
+  const b = CONFIG.bbox;
+  const area = `${b.minLon},${b.minLat},${b.maxLon},${b.maxLat}`;
+  const all = [];
+  let okAny = false;
+  for (const src of CONFIG.firmsSources) {
+    try {
+      const csv = await fetchText(
+        `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${CONFIG.firmsKey}/${src}/${area}/${CONFIG.firmsDays}`,
+        { mode: 'auto', timeout: 25000 });
+      if (/invalid/i.test(csv.slice(0, 200))) throw new Error('clave FIRMS rechazada');
+      all.push(...parseCSV(csv));
+      okAny = true;
+    } catch (e) { /* un satélite caído no tumba el resto */ }
+  }
+  if (!okAny) { setSource('firms', 'err'); return; }
+
+  lyrFIRMS.clearLayers();
+  firmsPoints = [];
+  const now = Date.now();
+  for (const r of all) {
+    const lat = parseFloat(r.latitude), lon = parseFloat(r.longitude);
+    if (isNaN(lat) || isNaN(lon)) continue;
+    const frp = parseFloat(r.frp) || 0;
+    const conf = String(r.confidence || '').toLowerCase();
+    const hhmm = String(r.acq_time || '0').padStart(4, '0');
+    const when = new Date(`${r.acq_date}T${hhmm.slice(0, 2)}:${hhmm.slice(2)}:00Z`);
+    const ageH = (now - when.getTime()) / 36e5;
+    firmsPoints.push({ lat, lon, frp, when });
+    L.circleMarker([lat, lon], {
+      radius: 4 + Math.min(14, Math.sqrt(frp || 1) * 2),
+      color: CONF_COLOR[conf] || '#fb923c', weight: 1,
+      fillColor: CONF_COLOR[conf] || '#fb923c',
+      fillOpacity: ageH <= 6 ? 0.75 : 0.35, opacity: ageH <= 6 ? 0.95 : 0.5,
+    }).bindPopup(
+      `<b>🔥 Foco ${esc(r.instrument || 'VIIRS')}/${esc(r.satellite || '')}</b><br>` +
+      `FRP: <b>${frp.toFixed(1)} MW</b> · confianza: <b>${esc(conf || '?')}</b><br>` +
+      `Detección: ${when.toLocaleString('es-ES')}<br>` +
+      `${lat.toFixed(4)}, ${lon.toFixed(4)}`
+    ).addTo(lyrFIRMS);
+  }
+  document.getElementById('firms-count').textContent = firmsPoints.length;
+  setSource('firms', 'ok');
+  checkProximity();
+}
+
+/* ================= AVISO DE PROXIMIDAD ================= */
+let userPos = null, userMarker = null;
+document.getElementById('prox-chip').addEventListener('click', () => {
+  if (!navigator.geolocation) return alert('Este navegador no permite geolocalización.');
+  if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+  navigator.geolocation.getCurrentPosition(p => {
+    userPos = [p.coords.latitude, p.coords.longitude];
+    if (userMarker) map.removeLayer(userMarker);
+    userMarker = L.marker(userPos, { icon: L.divIcon({ className: '', html: '<div style="font-size:20px">🧍</div>', iconSize: [20, 20], iconAnchor: [10, 10] }) })
+      .bindPopup('Tu posición vigilada').addTo(map);
+    checkProximity(true);
+  }, () => alert('No se pudo obtener tu posición.'), { enableHighAccuracy: false, timeout: 10000 });
+});
+function checkProximity(justActivated) {
+  const chip = document.getElementById('prox-chip');
+  if (!userPos) return;
+  if (!firmsPoints.length) { chip.textContent = '📍 Sin focos que evaluar'; return; }
+  let best = null;
+  for (const f of firmsPoints) {
+    const d = distKm(userPos, [f.lat, f.lon]);
+    if (!best || d < best.d) best = { d, f };
+  }
+  const near = best.d <= CONFIG.alertKm;
+  chip.classList.toggle('alerta', near);
+  chip.textContent = near
+    ? `🚨 Foco a ${best.d.toFixed(1)} km de ti`
+    : `📍 Foco más cercano: ${best.d.toFixed(0)} km`;
+  if (near && 'Notification' in window && Notification.permission === 'granted') {
+    new Notification('🚨 Monitor de Emergencias', {
+      body: `Foco térmico a ${best.d.toFixed(1)} km de tu posición (FRP ${best.f.frp.toFixed(0)} MW). En emergencia: 112.`,
+    });
+  }
+  if (justActivated && best) map.setView(userPos, 10);
+}
+
+/* ================= OSM / OVERPASS (bomberos, agua, helipuertos, núcleos) ================= */
+const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
+async function overpass(query) {
+  for (const ep of OVERPASS) {
+    try {
+      const r = await fetch(ep, { method: 'POST', body: 'data=' + encodeURIComponent(query) });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return (await r.json()).elements || [];
+    } catch (e) { /* siguiente espejo */ }
+  }
+  throw new Error('Overpass sin respuesta');
+}
+const RE_FORESTAL = /forestal|infoca|cedefo|brif|ret[eé]n|incendio|infoma/i;
+
+const OSM_LAYERS = [
+  {
+    layer: lyrBomberos, minZoom: 8,
+    build: bb => `[out:json][timeout:25];nwr["amenity"="fire_station"](${bb});out center 400;`,
+    render: el => {
+      const name = (el.tags && el.tags.name) || 'Parque de bomberos';
+      const forest = RE_FORESTAL.test(name) || RE_FORESTAL.test((el.tags && el.tags.operator) || '');
+      return { icon: forest ? '🌲🚒' : '🚒', size: forest ? 26 : 20,
+        pop: `<b>${forest ? 'Base defensa forestal / ' : ''}${esc(name)}</b>${el.tags && el.tags.operator ? '<br>' + esc(el.tags.operator) : ''}` };
+    },
+  },
+  {
+    layer: lyrAgua, minZoom: 9,
+    build: (bb, z) => `[out:json][timeout:25];(
+      nwr["emergency"~"^(fire_water_pond|water_tank|suction_point)$"](${bb});
+      ${z >= 14 ? `node["emergency"="fire_hydrant"](${bb});` : ''}
+    );out center 500;`,
+    render: el => {
+      const t = el.tags || {};
+      const tipo = t.emergency === 'fire_hydrant' ? 'Hidrante' : t.emergency === 'water_tank' ? 'Depósito de agua'
+        : t.emergency === 'suction_point' ? 'Punto de aspiración' : 'Balsa contra incendios';
+      return { icon: '💧', size: 18, pop: `<b>${tipo}</b>${t.name ? '<br>' + esc(t.name) : ''}${t.capacity ? '<br>Capacidad: ' + esc(t.capacity) : ''}` };
+    },
+  },
+  {
+    layer: lyrHelis, minZoom: 8,
+    build: bb => `[out:json][timeout:25];nwr["aeroway"="helipad"](${bb});out center 300;`,
+    render: el => ({ icon: '🚁', size: 18, pop: `<b>Helipuerto</b>${el.tags && el.tags.name ? '<br>' + esc(el.tags.name) : ''}` }),
+  },
+  {
+    layer: lyrNucleos, minZoom: 10,
+    build: bb => `[out:json][timeout:25];node["place"~"^(town|village|hamlet)$"](${bb});out 600;`,
+    render: el => {
+      const t = el.tags || {};
+      return { icon: '🏘', size: 16, pop: `<b>${esc(t.name || 'Núcleo de población')}</b><br>${t.place === 'town' ? 'Villa/ciudad' : t.place === 'village' ? 'Pueblo' : 'Aldea'}${t.population ? ' · ' + esc(t.population) + ' hab.' : ''}` };
+    },
+  },
+];
+
+let osmTimer = null;
+async function refreshOSMLayers() {
+  const z = map.getZoom();
+  const b = map.getBounds();
+  const bb = `${b.getSouth()},${b.getWest()},${b.getNorth()},${b.getEast()}`;
+  const active = OSM_LAYERS.filter(d => map.hasLayer(d.layer));
+  if (!active.length) return;
+  setSource('osm', 'load');
+  let okAny = false, gated = false;
+  for (const def of active) {
+    if (z < def.minZoom) { gated = true; def.layer.clearLayers(); continue; }
+    try {
+      const els = await overpass(def.build(bb, z));
+      def.layer.clearLayers();
+      for (const el of els) {
+        const lat = el.lat != null ? el.lat : (el.center && el.center.lat);
+        const lon = el.lon != null ? el.lon : (el.center && el.center.lon);
+        if (lat == null) continue;
+        const r = def.render(el);
+        L.marker([lat, lon], { icon: L.divIcon({ className: '', html: `<div style="font-size:${r.size}px;line-height:${r.size}px">${r.icon}</div>`, iconSize: [r.size, r.size], iconAnchor: [r.size / 2, r.size / 2] }) })
+          .bindPopup(r.pop + '<br><span style="color:#647085;font-size:11px">Fuente: OpenStreetMap · acerca el zoom para más detalle</span>').addTo(def.layer);
+      }
+      okAny = true;
+    } catch (e) { /* estado abajo */ }
+  }
+  setSource('osm', okAny || gated ? 'ok' : 'err');
+}
+map.on('moveend overlayadd', () => { clearTimeout(osmTimer); osmTimer = setTimeout(refreshOSMLayers, 700); });
 
 /* ================= NOTICIAS (Google News RSS) ================= */
 function gnewsUrl(query) {
   return 'https://news.google.com/rss/search?q=' + encodeURIComponent(query) + '&hl=es&gl=ES&ceid=ES:es';
 }
-async function loadNews(paneId, srcId, query) {
-  const pane = document.getElementById(paneId);
+async function loadNews(targetId, srcId, query) {
+  const box = document.getElementById(targetId);
   setSource(srcId, 'load');
   try {
-    const xml = await fetchText(gnewsUrl(query), { proxy: true });
+    const xml = await fetchText(gnewsUrl(query), { mode: 'proxy' });
     const items = parseFeed(xml).slice(0, 30);
     if (!items.length) throw new Error('feed vacío');
-    pane.innerHTML = items.map(it => {
-      const m = it.title.match(/^(.*)\s+-\s+([^-]+)$/); // Google News añade " - Medio"
+    box.innerHTML = items.map(it => {
+      const m = it.title.match(/^(.*)\s+-\s+([^-]+)$/);
       const t = m ? m[1] : it.title, src = it.source || (m ? m[2] : '');
       return `<div class="item"><a href="${esc(it.link)}" target="_blank" rel="noopener">${esc(t)}</a>
         <span class="meta"><span class="src">${esc(src)}</span> · ${fmtTime(it.date)}</span></div>`;
     }).join('');
     setSource(srcId, 'ok');
+    return items;
   } catch (e) {
-    pane.innerHTML = `<div class="empty">No se pudo cargar (${esc(String(e.message || e))}).<br>Reintento en el próximo ciclo.</div>`;
+    box.innerHTML = `<div class="empty">No se pudo cargar (${esc(String(e.message || e))}).<br>Reintento en el próximo ciclo.</div>`;
     setSource(srcId, 'err');
+    return [];
   }
 }
+
+/* ================= MUNICIPIOS AFECTADOS (detección + manual + geocodificación) ================= */
+const geoCache = (() => { try { return JSON.parse(localStorage.getItem('geoCache') || '{}'); } catch (e) { return {}; } })();
+let geoChain = Promise.resolve();
+function geocode(query) {
+  if (geoCache[query]) return Promise.resolve(geoCache[query]);
+  geoChain = geoChain.then(async () => {
+    await new Promise(r => setTimeout(r, 1100)); // cortesía Nominatim: 1 req/s
+    try {
+      const j = JSON.parse(await fetchText(
+        'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=es&q=' + encodeURIComponent(query),
+        { mode: 'auto' }));
+      if (j[0]) {
+        geoCache[query] = { lat: parseFloat(j[0].lat), lon: parseFloat(j[0].lon) };
+        try { localStorage.setItem('geoCache', JSON.stringify(geoCache)); } catch (e) {}
+        return geoCache[query];
+      }
+    } catch (e) {}
+    return null;
+  });
+  return geoChain;
+}
+
+const muniState = new Map(); // nombre -> {source:'noticias'|'manual', pos|null, region}
+function detectMunicipios(newsItems) {
+  const text = norm(newsItems.map(i => i.title).join(' · '));
+  if (text) {
+    for (const name of MUNI_MADRID) {
+      if (muniState.has(name)) continue;
+      const re = new RegExp('(?:^|[^a-zñ])' + norm(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?:[^a-zñ]|$)');
+      if (re.test(text)) muniState.set(name, { source: 'noticias', pos: null, region: 'Comunidad de Madrid' });
+    }
+  }
+  for (const entry of CONFIG.municipiosDeclarados) {
+    const name = entry.split(',')[0].trim();
+    if (name && !muniState.has(name)) muniState.set(name, { source: 'manual', pos: null, region: entry.includes(',') ? entry.split(',').slice(1).join(',').trim() : 'España' });
+  }
+  renderMunis();
+  resolveMuniPositions();
+}
+async function resolveMuniPositions() {
+  const pending = Array.from(muniState.entries()).filter(([, st]) => !st.pos);
+  if (!pending.length) return;
+  setSource('geo', 'load');
+  let okAll = true;
+  for (const [name, st] of pending) {
+    const pos = await geocode(`${name}, ${st.region}`);
+    if (pos) { st.pos = pos; renderMunis(); } else okAll = false;
+  }
+  setSource('geo', okAll ? 'ok' : 'err');
+}
+function renderMunis() {
+  const box = document.getElementById('muni-box');
+  const chips = document.getElementById('muni-chips');
+  if (!muniState.size) { box.hidden = true; return; }
+  box.hidden = false;
+  chips.innerHTML = Array.from(muniState.entries()).map(([name, st]) =>
+    `<span class="chip ${st.source === 'manual' ? 'manual' : ''}" data-muni="${esc(name)}" title="${st.source === 'manual' ? 'Declarado por el operador (X Delegación del Gobierno)' : 'Detectado en titulares de noticias'}">${st.source === 'manual' ? '📢' : '📰'} ${esc(name)}</span>`
+  ).join('');
+  lyrMunis.clearLayers();
+  for (const [name, st] of muniState) {
+    if (!st.pos) continue;
+    L.marker([st.pos.lat, st.pos.lon], { icon: L.divIcon({ className: '', html: '<div style="font-size:24px;line-height:24px">🚩</div>', iconSize: [24, 24], iconAnchor: [12, 22] }) })
+      .bindPopup(`<b>🚩 ${esc(name)}</b><br>${st.source === 'manual' ? 'Declarado por el operador (fuente: X Delegación del Gobierno)' : 'Citado en titulares de noticias de la emergencia'}`)
+      .addTo(lyrMunis);
+  }
+}
+document.getElementById('muni-chips').addEventListener('click', e => {
+  const chip = e.target.closest('.chip'); if (!chip) return;
+  const st = muniState.get(chip.dataset.muni);
+  if (st && st.pos) map.flyTo([st.pos.lat, st.pos.lon], 12);
+});
 
 /* ================= AVISOS METEOALARM (AEMET) ================= */
 const SEV_MAP = { extreme: ['sev-red', 'ROJO'], severe: ['sev-orange', 'NARANJA'], moderate: ['sev-yellow', 'AMARILLO'], minor: ['sev-green', 'MENOR'] };
@@ -353,7 +694,7 @@ async function loadAvisos() {
   const pane = document.getElementById('p-avisos');
   setSource('meteoalarm', 'load');
   try {
-    const xml = await fetchText('https://feeds.meteoalarm.org/feeds/meteoalarm-legacy-atom-spain', { proxy: true });
+    const xml = await fetchText('https://feeds.meteoalarm.org/feeds/meteoalarm-legacy-atom-spain', { mode: 'proxy' });
     const doc = new DOMParser().parseFromString(xml, 'text/xml');
     if (doc.querySelector('parsererror')) throw new Error('XML inválido');
     const rows = [];
@@ -363,8 +704,7 @@ async function loadAvisos() {
       const sevRaw = (txt(en, 'severity') || txt(en, 'awareness_level')).toLowerCase();
       const sevKey = Object.keys(SEV_MAP).find(k => sevRaw.includes(k));
       if (!sevKey || sevKey === 'minor') continue;
-      const interes = CONFIG.zonasInteres.test(area);
-      rows.push({ area, event, sevKey, interes, until: txt(en, 'expires') });
+      rows.push({ area, event, sevKey, interes: CONFIG.zonasInteres.test(area), until: txt(en, 'expires') });
     }
     rows.sort((a, b) => (b.interes - a.interes) || ['minor','moderate','severe','extreme'].indexOf(b.sevKey) - ['minor','moderate','severe','extreme'].indexOf(a.sevKey));
     pane.innerHTML = rows.length ? rows.slice(0, 60).map(r => {
@@ -381,19 +721,19 @@ async function loadAvisos() {
   }
 }
 
-/* ================= INCENDIOS EONET (misma fuente que worldmonitor) ================= */
+/* ================= INCENDIOS EONET ================= */
 async function loadEONET() {
   setSource('eonet', 'load');
   try {
     const b = CONFIG.bbox;
     const j = JSON.parse(await fetchText(
-      `https://eonet.gsfc.nasa.gov/api/v3/events?category=wildfires&status=open&bbox=${b.minLon},${b.maxLat},${b.maxLon},${b.minLat}`));
+      `https://eonet.gsfc.nasa.gov/api/v3/events?category=wildfires&status=open&bbox=${b.minLon},${b.maxLat},${b.maxLon},${b.minLat}`, { mode: 'auto' }));
     lyrEONET.clearLayers();
     for (const ev of (j.events || [])) {
       const g = ev.geometry && ev.geometry[ev.geometry.length - 1];
       if (!g || !g.coordinates) continue;
       const [lon, lat] = g.coordinates;
-      L.marker([lat, lon], { icon: L.divIcon({ className: '', html: '<div style="font-size:22px;line-height:22px">🔥</div>', iconSize: [22, 22], iconAnchor: [11, 11] }) })
+      L.marker([lat, lon], { icon: L.divIcon({ className: '', html: '<div style="font-size:22px;line-height:22px">📍</div>', iconSize: [22, 22], iconAnchor: [11, 20] }) })
         .bindPopup(`<b>${esc(ev.title)}</b><br>Declarado: ${fmtTime(g.date)}<br><a href="${esc((ev.sources && ev.sources[0] && ev.sources[0].url) || '#')}" target="_blank" rel="noopener">fuente</a>`)
         .addTo(lyrEONET);
     }
@@ -408,7 +748,7 @@ async function loadQuakes() {
   lyrQuakes.clearLayers();
   const rows = [];
   try {
-    const xml = await fetchText('https://www.ign.es/ign/RssTools/sismologia.xml', { proxy: true });
+    const xml = await fetchText('https://www.ign.es/ign/RssTools/sismologia.xml', { mode: 'proxy' });
     for (const it of parseFeed(xml).slice(0, 40)) {
       const lat = parseFloat(txt(it.el, 'lat')), lon = parseFloat(txt(it.el, 'long'));
       const mM = it.title.match(/([\d.]+)\s*(?:mbLg|Mw|M)\b/i) || it.title.match(/magnitud[:\s]*([\d.]+)/i);
@@ -419,7 +759,7 @@ async function loadQuakes() {
     try {
       const b = CONFIG.bbox;
       const j = JSON.parse(await fetchText(
-        `https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&minlatitude=${b.minLat}&maxlatitude=${b.maxLat}&minlongitude=${b.minLon}&maxlongitude=${b.maxLon}&orderby=time&limit=40`));
+        `https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&minlatitude=${b.minLat}&maxlatitude=${b.maxLat}&minlongitude=${b.minLon}&maxlongitude=${b.maxLon}&orderby=time&limit=40`, { mode: 'auto' }));
       for (const f of (j.features || [])) {
         rows.push({ title: f.properties.title, link: f.properties.url, date: f.properties.time,
           lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0], mag: f.properties.mag, src: 'USGS' });
@@ -446,7 +786,7 @@ async function load303030() {
   try {
     const lats = CONFIG.locs.map(l => l.lat).join(','), lons = CONFIG.locs.map(l => l.lon).join(',');
     const j = JSON.parse(await fetchText(
-      `https://api.open-meteo.com/v1/forecast?latitude=${lats}&longitude=${lons}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_gusts_10m&timezone=Europe%2FMadrid`));
+      `https://api.open-meteo.com/v1/forecast?latitude=${lats}&longitude=${lons}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,wind_gusts_10m&timezone=Europe%2FMadrid`, { mode: 'auto' }));
     const arr = Array.isArray(j) ? j : [j];
     grid.innerHTML = CONFIG.locs.map((loc, i) => {
       const c = arr[i] && arr[i].current; if (!c) return '';
@@ -469,7 +809,7 @@ async function load303030() {
 /* ================= PANEL DE CUENTAS X ================= */
 function renderX() {
   const pane = document.getElementById('p-x');
-  let h = '<div class="nota">X no ofrece RSS/API pública gratuita: worldmonitor tampoco lo integra en abierto. Enlaces directos a fuentes oficiales y búsquedas en vivo:</div>';
+  let h = '<div class="nota">X no ofrece RSS/API pública gratuita. Enlaces directos a fuentes oficiales y búsquedas en vivo. Los municipios que la Delegación del Gobierno declare en X se transcriben en <b>CONFIG.municipiosDeclarados</b> y aparecen como 🚩 en el mapa.</div>';
   for (const [group, accs] of X_ACCOUNTS) {
     h += `<div class="xgroup">${esc(group)}</div>`;
     h += accs.map(([handle, desc]) =>
@@ -481,6 +821,8 @@ function renderX() {
   h += `<div class="xgroup">Visores oficiales</div>
     <div class="xacc"><a href="https://www.juntadeandalucia.es/medioambiente/portal/web/plan-infoca" target="_blank" rel="noopener">Plan INFOCA</a><span>Junta de Andalucía</span></div>
     <div class="xacc"><a href="https://forest-fire.emergency.copernicus.eu/apps/effis_current_situation/" target="_blank" rel="noopener">EFFIS Current Situation</a><span>Copernicus</span></div>
+    <div class="xacc"><a href="https://firms.modaps.eosdis.nasa.gov/map/" target="_blank" rel="noopener">NASA FIRMS</a><span>Focos térmicos por satélite</span></div>
+    <div class="xacc"><a href="https://xn--incendiosespaa-2nb.es/" target="_blank" rel="noopener">IncendiosEspaña.es</a><span>Agregador independiente de referencia</span></div>
     <div class="xacc"><a href="https://www.aemet.es/es/eltiempo/prediccion/avisos" target="_blank" rel="noopener">Avisos AEMET</a><span>Meteorología</span></div>
     <div class="xacc"><a href="https://emergency.copernicus.eu/" target="_blank" rel="noopener">Copernicus EMS</a><span>Activaciones de emergencia</span></div>
     <div class="xacc"><a href="https://www.ign.es/web/ign/portal/sis-catalogo-terremotos" target="_blank" rel="noopener">Sismicidad IGN</a><span>Instituto Geográfico Nacional</span></div>
@@ -489,34 +831,41 @@ function renderX() {
 }
 
 /* ================= ORQUESTACIÓN ================= */
-function refreshNews() {
-  loadNews('p-madrid', 'gn-madrid', CONFIG.queries.madrid);
+async function refreshNews() {
+  const madridItems = await loadNews('news-madrid', 'gn-madrid', CONFIG.queries.madrid);
+  detectMunicipios(madridItems);
   loadNews('p-andalucia', 'gn-andalucia', CONFIG.queries.andalucia);
   loadNews('p-pcivil', 'gn-pcivil', CONFIG.queries.pcivil);
 }
-function refreshData() { loadAvisos(); loadEONET(); loadQuakes(); load303030(); }
-function refreshAll() { refreshNews(); refreshData(); }
+function refreshData() {
+  loadAvisos(); loadEONET(); loadQuakes(); load303030();
+  for (const w of [wmsHotspots, wmsBurnt, wmsFWI]) { if (map.hasLayer(w)) w.setParams({ _t: Date.now() }); }
+}
+function refreshAll() { refreshNews(); refreshData(); loadFIRMS(); refreshOSMLayers(); }
 
+regSource('firms', 'Focos FIRMS');
 regSource('gn-madrid', 'Noticias Madrid');
 regSource('gn-andalucia', 'Noticias Andalucía');
 regSource('gn-pcivil', 'P. Civil');
 regSource('meteoalarm', 'Avisos AEMET');
-regSource('eonet', 'EONET incendios');
+regSource('eonet', 'EONET');
 regSource('sismos', 'Sismos');
 regSource('meteo', 'Meteo 30-30-30');
+regSource('osm', 'OSM equipamientos');
+regSource('geo', 'Geocodificación');
+setSource('osm', 'ok'); setSource('geo', 'ok'); // pasivas hasta que se usan
 
 renderX();
 refreshAll();
 setInterval(refreshNews, CONFIG.refreshNewsMin * 60 * 1000);
 setInterval(refreshData, CONFIG.refreshDataMin * 60 * 1000);
+setInterval(loadFIRMS, CONFIG.refreshFirmsMin * 60 * 1000);
 
-/* Pestañas */
 document.getElementById('tabs').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('active', x === b));
   document.querySelectorAll('.tabpane').forEach(p => p.classList.toggle('active', p.id === b.dataset.pane));
 });
-/* Reloj y botón */
 setInterval(() => { document.getElementById('clock').textContent = new Date().toLocaleTimeString('es-ES'); }, 1000);
 document.getElementById('btn-refresh').addEventListener('click', refreshAll);
 </script>
