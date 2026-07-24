@@ -374,17 +374,15 @@ const map = L.map('map', { zoomControl: true }).setView(CONFIG.mapCenter, CONFIG
 
 const baseOSM = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
   { maxZoom: 19, attribution: '© OpenStreetMap' });
-const baseDark = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-  { maxZoom: 19, attribution: '© OpenStreetMap · © CARTO' });
 const baseIGN = L.tileLayer('https://tms-ign-base.idee.es/1.0.0/IGNBaseTodo/{z}/{x}/{-y}.jpeg',
   { maxZoom: 17, attribution: 'CC BY 4.0 ign.es' });
 const basePNOA = L.tileLayer('https://tms-pnoa-ma.idee.es/1.0.0/pnoa-ma/{z}/{x}/{-y}.jpeg',
   { maxZoom: 19, attribution: 'PNOA © IGN' });
-baseDark.addTo(map);
+basePNOA.addTo(map);
 
 /* Cada capa superpuesta vive en su propio "pane": así puede reordenarse (z-index)
    y regularse su transparencia (opacity CSS) desde el panel 🗂 Capas. */
-const PANE_IDS = ['firms','munis','eonet','wind','temp','bomberos','agua','helis','nucleos','quakes','hs','gibs','ba','limites','fwi','veg'];
+const PANE_IDS = ['firms','munis','eonet','wind','temp','bomberos','agua','helis','nucleos','quakes','hs','gibs','ba','limites','fwi','veg','osmref'];
 for (const id of PANE_IDS) map.createPane('pane_' + id);
 
 const EFFIS = 'https://maps.effis.emergency.copernicus.eu/effis';
@@ -405,6 +403,9 @@ const wmsMunicipios = L.tileLayer.wms('https://www.ign.es/wms-inspire/unidades-a
 const wmsVegetacion = L.tileLayer.wms('https://servicios.idee.es/wms-inspire/ocupacion-suelo', { pane: 'pane_veg',
   layers: 'LC.LandCoverSurfaces', format: 'image/png', transparent: true,
   attribution: 'Ocupación del suelo SIOSE © IGN', version: '1.3.0' });
+/* Callejero OSM superpuesto al satélite PNOA (híbrido; transparencia regulable) */
+const osmHybrid = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+  { pane: 'pane_osmref', maxZoom: 19, attribution: '© OpenStreetMap' });
 /* Anomalías térmicas VIIRS con fecha de ayer (la capa "default" puede servir día vacío) */
 const gibsDate = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
 const gibsThermal = L.tileLayer(
@@ -441,6 +442,7 @@ const OVERLAYS = [
   { id: 'limites',  label: '🗺 Límites municipales (IGN)',           layer: wmsMunicipios, on: false, op: 0.7 },
   { id: 'fwi',      label: '🟠 Riesgo incendio hoy — FWI (EFFIS)',  layer: wmsFWI,       on: false, op: 0.55 },
   { id: 'veg',      label: '🌿 Vegetación / ocupación suelo (IGN)', layer: wmsVegetacion, on: false, op: 0.6 },
+  { id: 'osmref',   label: '🗺 Callejero OSM sobre satélite (50 %)', layer: osmHybrid,    on: true,  op: 0.5 },
 ];
 
 /* Estado guardado del panel de capas (orden, visibilidad, transparencia) */
@@ -569,7 +571,7 @@ for (const ly of [wmsFWI, wmsHotspots, wmsBurnt, wmsMunicipios, wmsVegetacion, g
 
 /* El selector estándar queda solo para los mapas base */
 L.control.layers(
-  { 'CARTO oscuro': baseDark, 'OpenStreetMap': baseOSM, 'IGN Base': baseIGN, 'PNOA satélite (IGN)': basePNOA },
+  { 'PNOA satélite (IGN)': basePNOA, 'OpenStreetMap': baseOSM, 'IGN Base': baseIGN },
   null, { collapsed: true }
 ).addTo(map);
 
