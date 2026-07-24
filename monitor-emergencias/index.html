@@ -445,7 +445,7 @@ const OVERLAYS = [
   { id: 'quakes',   label: '🌍 Sismos recientes (IGN/USGS)',        layer: lyrQuakes,    on: false, op: 1 },
   { id: 'hs',       label: '🛰 Focos raster MODIS/VIIRS (EFFIS)',   layer: wmsHotspots,  on: true,  op: 1 },
   { id: 'gibs',     label: '🌡 Anomalías térmicas VIIRS (NASA)',    layer: gibsThermal,  on: false, op: 1 },
-  { id: 'ba',       label: '⬛ Perímetros área quemada (EFFIS)',     layer: wmsBurnt,     on: false, op: 0.8 },
+  { id: 'ba',       label: '⬛ Perímetros área quemada (EFFIS)',     layer: wmsBurnt,     on: true,  op: 1 },
   { id: 'limites',  label: '🗺 Límites municipales (IGN)',           layer: wmsMunicipios, on: false, op: 0.7 },
   { id: 'fwi',      label: '🟠 Riesgo incendio hoy — FWI (EFFIS)',  layer: wmsFWI,       on: false, op: 0.55 },
   { id: 'veg',      label: '🌿 Vegetación / ocupación suelo (IGN)', layer: wmsVegetacion, on: false, op: 0.6 },
@@ -490,7 +490,7 @@ capasCtl.onAdd = () => {
   const d = L.DomUtil.create('div', 'capas-panel');
   L.DomEvent.disableClickPropagation(d);
   L.DomEvent.disableScrollPropagation(d);
-  d.innerHTML = '<div class="capas-head" id="capas-head">🗂 Capas <span style="float:right" id="capas-arrow">▾</span></div><div id="capas-list"></div>';
+  d.innerHTML = '<div class="capas-head" id="capas-head">🗂 Capas <span style="float:right" id="capas-arrow">▾</span><span style="float:right;margin-right:10px" id="capas-reset" title="Restablecer orden, visibilidad y transparencias de fábrica">⟲</span></div><div id="capas-list"></div>';
   return d;
 };
 capasCtl.addTo(map);
@@ -544,6 +544,11 @@ document.addEventListener('dragend', () => {
   dragCapaId = null;
 });
 document.addEventListener('click', e => {
+  if (e.target.id === 'capas-reset') {
+    try { localStorage.removeItem('capas'); } catch (err) {}
+    location.reload();
+    return;
+  }
   if (e.target.id === 'capas-head' || e.target.id === 'capas-arrow') {
     const list = document.getElementById('capas-list');
     const hidden = list.style.display === 'none';
@@ -635,24 +640,25 @@ const WindCanvas = L.Layer.extend({
     const W = this._canvas.width, H = this._canvas.height;
     if (!W) return;
     if (!windField) { ctx.clearRect(0, 0, W, H); return; }
-    /* fundido de las estelas anteriores */
+    /* fundido de las estelas anteriores (más lento = estelas más largas y visibles) */
     ctx.globalCompositeOperation = 'destination-in';
-    ctx.fillStyle = 'rgba(0,0,0,0.93)';
+    ctx.fillStyle = 'rgba(0,0,0,0.955)';
     ctx.fillRect(0, 0, W, H);
     ctx.globalCompositeOperation = 'source-over';
-    const target = Math.min(700, Math.round(W * H / 3200));
+    const target = Math.min(900, Math.round(W * H / 2600));
     while (this._particles.length < target)
-      this._particles.push({ x: Math.random() * W, y: Math.random() * H, age: Math.random() * 70 });
-    ctx.lineWidth = 1.3;
+      this._particles.push({ x: Math.random() * W, y: Math.random() * H, age: Math.random() * 90 });
+    ctx.lineWidth = 2.1;
+    ctx.lineCap = 'round';
     for (const p of this._particles) {
       const uv = this._sample(p.x, p.y);
-      if (!uv || p.age > 70 || p.x < -5 || p.y < -5 || p.x > W + 5 || p.y > H + 5) {
+      if (!uv || p.age > 90 || p.x < -5 || p.y < -5 || p.x > W + 5 || p.y > H + 5) {
         p.x = Math.random() * W; p.y = Math.random() * H; p.age = 0; continue;
       }
       const spd = Math.hypot(uv[0], uv[1]);
-      const k = 0.06; // km/h → píxeles por fotograma
+      const k = 0.09; // km/h → píxeles por fotograma
       const nx = p.x + uv[0] * k, ny = p.y - uv[1] * k;
-      ctx.strokeStyle = spd > 50 ? '#f87171' : spd > 30 ? '#fb923c' : spd > 20 ? '#fbbf24' : '#8fb4d8';
+      ctx.strokeStyle = spd > 50 ? '#ff5b5b' : spd > 30 ? '#ff9f43' : spd > 20 ? '#ffe066' : '#9fc7f5';
       ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(nx, ny); ctx.stroke();
       p.x = nx; p.y = ny; p.age++;
     }
@@ -1039,7 +1045,9 @@ async function buildPrediction() {
         }
       }
 
-      const zonaPoly = L.polygon(zonaPts, { pane: 'pane_pred', color: '#ef4444', weight: 2, fillColor: '#ef4444', fillOpacity: 0.15 });
+      /* Borde blanco de contraste bajo el perímetro rojo: visible sobre cualquier base */
+      L.polygon(zonaPts, { pane: 'pane_pred', color: '#ffffff', weight: 6, opacity: 0.75, fill: false, interactive: false }).addTo(lyrPred);
+      const zonaPoly = L.polygon(zonaPts, { pane: 'pane_pred', color: '#ff3b30', weight: 3, fillColor: '#ff3b30', fillOpacity: 0.22 });
 
       if (avance == null || !z.wind) {
         zonaPoly.bindPopup(`<b>🔥 Zona de focos</b> · ${c.length} focos · FRP total ${frpSum.toFixed(0)} MW<br>Primera detección: ${tMin.toLocaleString('es-ES')}<br>Última: ${tMax.toLocaleString('es-ES')}<br>⚠ Sin dato de viento: no se proyecta avance.`).addTo(lyrPred);
@@ -1072,12 +1080,13 @@ async function buildPrediction() {
         `ROS estimada: <b>${ros.toFixed(1)} km/h</b> → avance ≈ <b>${headKm.toFixed(1)} km</b><br>` +
         `<span style="color:#647085;font-size:11px">⚠ Estimación docente simplificada. No es un modelo de propagación validado ni sustituye a los servicios oficiales.</span>`;
 
-      L.polygon(pred, { pane: 'pane_pred', color: '#fbbf24', weight: 2, dashArray: '7 5', fillColor: '#fbbf24', fillOpacity: 0.10 })
+      L.polygon(pred, { pane: 'pane_pred', color: '#ffffff', weight: 5, opacity: 0.55, fill: false, interactive: false }).addTo(lyrPred);
+      L.polygon(pred, { pane: 'pane_pred', color: '#ffd60a', weight: 2.5, dashArray: '8 6', fillColor: '#ffd60a', fillOpacity: 0.13 })
         .bindPopup(popup).addTo(lyrPred);
       zonaPoly.bindPopup(popup).addTo(lyrPred);
       /* Flecha de avance con etiqueta del horizonte */
       const punta = destPoint(z.lat, z.lon, avance, frenteBase + headKm);
-      L.polyline([[z.lat, z.lon], punta], { pane: 'pane_pred', color: '#fbbf24', weight: 2 }).addTo(lyrPred);
+      L.polyline([[z.lat, z.lon], punta], { pane: 'pane_pred', color: '#ffd60a', weight: 3 }).addTo(lyrPred);
       L.marker(punta, { pane: 'pane_pred', icon: L.divIcon({ className: '', iconSize: [46, 16], iconAnchor: [23, 8],
         html: `<div style="color:#fbbf24;font-weight:700;font-size:11px;text-shadow:0 0 4px #000;text-align:center">+${CONFIG.predHoras} h</div>` }) })
         .bindPopup(popup).addTo(lyrPred);
