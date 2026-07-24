@@ -12,7 +12,24 @@ Protección Civil** (módulo de Intervención Operativa), centrada en la emergen
 
 ---
 
-## Fuentes cargadas (v2)
+## Novedades v3
+
+- **Panel 🗂 Capas propio**: activar/desactivar, **reordenar (▲▼)** y **transparencia por capa**
+  (deslizador). El estado se recuerda en el navegador.
+- **Agrupación de focos FIRMS**: a zoom lejano los focos se agrupan en círculos con recuento
+  (color = peor confianza del grupo, popup con FRP total); al acercar el zoom se separan.
+- **🔎 Buscador** (arriba a la izquierda del mapa): 📍 vuela a una población (Nominatim) y
+  🔥 busca un **incendio declarado** por su nombre operativo (p. ej. «IF Córdoba», como los
+  nombra INFOCA) en las noticias de las últimas 48 h, con enlace a la búsqueda en vivo en X,
+  y centra el mapa en la zona para ver los focos.
+- **🌿 Vegetación / ocupación del suelo**: WMS INSPIRE oficial (SIOSE/CLC, IGN).
+- **🌬 Viento y 🌡 Temperatura sobre el mapa**: rejilla de flechas (dirección + velocidad,
+  color por racha) y valores de temperatura (color por umbral), de Open-Meteo, recalculada
+  al mover el mapa.
+- **Pestaña 🌬 Windy**: visor Windy.com embebido con animación (viento, rachas, temperatura,
+  humedad).
+
+## Fuentes cargadas
 
 | Fuente | Qué aporta | Vía |
 |---|---|---|

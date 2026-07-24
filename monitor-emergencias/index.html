@@ -104,10 +104,39 @@
   .dot.ok{background:var(--ok);} .dot.err{background:var(--critical);} .dot.load{background:var(--warn); animation:pulse 1s infinite;}
   .disclaimer{margin-left:auto; color:var(--ink3); font-style:italic;}
 
+  /* Buscador de poblaciones e incendios */
+  .buscar-panel{background:var(--panel2); border:1px solid var(--border); border-radius:8px; width:250px; font-size:12px;}
+  .buscar-fila{display:flex; gap:4px; padding:6px;}
+  .buscar-fila input{flex:1; background:var(--bg); color:var(--ink); border:1px solid var(--border); border-radius:5px; padding:4px 7px; font-size:12px; min-width:0;}
+  .buscar-fila button{background:var(--panel); border:1px solid var(--border); border-radius:5px; cursor:pointer; font-size:14px; padding:2px 7px;}
+  .buscar-fila button:hover{border-color:var(--accent);}
+  #buscar-res{max-height:220px; overflow-y:auto; border-top:1px solid var(--border);}
+  .buscar-item{padding:6px 8px; border-bottom:1px solid var(--border); color:var(--ink2); line-height:1.3;}
+  .buscar-item a{color:var(--ink); text-decoration:none; font-weight:500;}
+  .buscar-item a:hover{color:var(--accent);}
+
+  /* Panel de capas (orden + transparencia) */
+  .capas-panel{background:var(--panel2); border:1px solid var(--border); border-radius:8px; font-size:11px; color:var(--ink); width:252px; max-height:62vh; overflow-y:auto;}
+  .capas-head{padding:6px 10px; font-weight:700; border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--panel2); cursor:pointer;}
+  .capa-row{padding:5px 8px 6px; border-bottom:1px solid var(--border);}
+  .capa-row .fila1{display:flex; align-items:center; gap:5px;}
+  .capa-row .capa-name{flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ink2);}
+  .capa-row input[type=checkbox]{accent-color:var(--accent);}
+  .capa-row button{background:var(--panel); color:var(--ink2); border:1px solid var(--border); border-radius:4px; cursor:pointer; font-size:9px; padding:1px 4px;}
+  .capa-row button:disabled{opacity:.3; cursor:default;}
+  .capa-row input[type=range]{width:100%; height:14px; accent-color:var(--accent); margin-top:3px;}
+
   /* Leyenda FIRMS sobre el mapa */
   .leyenda{background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:8px 10px; font-size:11px; color:var(--ink2); line-height:1.5; max-width:210px;}
   .leyenda b{color:var(--ink);}
   .lg-dot{display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:4px; vertical-align:-1px;}
+
+  /* Visor Windy embebido */
+  .tabpane#p-windy.active{display:flex; flex-direction:column;}
+  .windy-btns{display:flex; gap:6px; padding:8px 12px;}
+  .windy-btns button{background:var(--panel2); color:var(--ink2); border:1px solid var(--border); border-radius:6px; padding:4px 10px; cursor:pointer; font-size:12px;}
+  .windy-btns button.active{color:var(--ink); border-color:var(--accent);}
+  #p-windy iframe{flex:1; width:100%; border:0; min-height:320px;}
 
   .leaflet-container{font:inherit;}
   .leaflet-popup-content-wrapper,.leaflet-popup-tip{background:var(--panel2); color:var(--ink);}
@@ -139,6 +168,7 @@
       <button data-pane="p-303030">🌡 30-30-30</button>
       <button data-pane="p-sismos">🌍 Sismos</button>
       <button data-pane="p-x">𝕏 Oficiales</button>
+      <button data-pane="p-windy">🌬 Windy</button>
     </nav>
     <div class="tabpane active" id="p-madrid">
       <div id="muni-box" hidden>
@@ -158,6 +188,7 @@
     </div>
     <div class="tabpane" id="p-sismos"><div class="empty">Cargando sismicidad IGN/USGS…</div></div>
     <div class="tabpane" id="p-x"></div>
+    <div class="tabpane" id="p-windy"></div>
   </aside>
 </main>
 
@@ -348,54 +379,219 @@ const basePNOA = L.tileLayer('https://tms-pnoa-ma.idee.es/1.0.0/pnoa-ma/{z}/{x}/
   { maxZoom: 19, attribution: 'PNOA © IGN' });
 baseDark.addTo(map);
 
+/* Cada capa superpuesta vive en su propio "pane": así puede reordenarse (z-index)
+   y regularse su transparencia (opacity CSS) desde el panel 🗂 Capas. */
+const PANE_IDS = ['firms','munis','eonet','wind','temp','bomberos','agua','helis','nucleos','quakes','hs','gibs','ba','limites','fwi','veg'];
+for (const id of PANE_IDS) map.createPane('pane_' + id);
+
 const EFFIS = 'https://maps.effis.emergency.copernicus.eu/effis';
-const wmsFWI = L.tileLayer.wms(EFFIS, {
-  layers: 'ecmwf007.fwi', format: 'image/png', transparent: true, opacity: 0.55,
+const wmsFWI = L.tileLayer.wms(EFFIS, { pane: 'pane_fwi',
+  layers: 'ecmwf007.fwi', format: 'image/png', transparent: true,
   attribution: 'EFFIS © Copernicus', version: '1.1.1' });
-const wmsHotspots = L.tileLayer.wms(EFFIS, {
+const wmsHotspots = L.tileLayer.wms(EFFIS, { pane: 'pane_hs',
   layers: 'modis.hs,viirs.hs', format: 'image/png', transparent: true,
   attribution: 'Focos MODIS/VIIRS · EFFIS', version: '1.1.1' });
-const wmsBurnt = L.tileLayer.wms(EFFIS, {
-  layers: 'modis.ba,viirs.ba', format: 'image/png', transparent: true, opacity: 0.8,
+const wmsBurnt = L.tileLayer.wms(EFFIS, { pane: 'pane_ba',
+  layers: 'modis.ba,viirs.ba', format: 'image/png', transparent: true,
   attribution: 'Perímetros área quemada · EFFIS', version: '1.1.1' });
 /* Límites municipales — WMS INSPIRE oficial del IGN */
-const wmsMunicipios = L.tileLayer.wms('https://www.ign.es/wms-inspire/unidades-administrativas', {
-  layers: 'AU.AdministrativeBoundary', format: 'image/png', transparent: true, opacity: 0.7,
+const wmsMunicipios = L.tileLayer.wms('https://www.ign.es/wms-inspire/unidades-administrativas', { pane: 'pane_limites',
+  layers: 'AU.AdministrativeBoundary', format: 'image/png', transparent: true,
   attribution: 'Unidades administrativas © IGN', version: '1.3.0' });
+/* Vegetación / ocupación del suelo — WMS INSPIRE oficial (SIOSE/CLC) */
+const wmsVegetacion = L.tileLayer.wms('https://servicios.idee.es/wms-inspire/ocupacion-suelo', { pane: 'pane_veg',
+  layers: 'LC.LandCoverSurfaces', format: 'image/png', transparent: true,
+  attribution: 'Ocupación del suelo SIOSE © IGN', version: '1.3.0' });
 /* Anomalías térmicas VIIRS con fecha de ayer (la capa "default" puede servir día vacío) */
 const gibsDate = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
 const gibsThermal = L.tileLayer(
   `https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_NOAA20_Thermal_Anomalies_375m_All/default/${gibsDate}/GoogleMapsCompatible_Level8/{z}/{y}/{x}.png`,
-  { maxNativeZoom: 8, maxZoom: 12, attribution: 'NASA GIBS/VIIRS' });
+  { pane: 'pane_gibs', maxNativeZoom: 8, maxZoom: 12, attribution: 'NASA GIBS/VIIRS' });
 
-const lyrFIRMS = L.layerGroup().addTo(map);
-const lyrEONET = L.layerGroup().addTo(map);
-const lyrMunis = L.layerGroup().addTo(map);
+const lyrFIRMS = L.layerGroup();
+const lyrEONET = L.layerGroup();
+const lyrMunis = L.layerGroup();
 const lyrQuakes = L.layerGroup();
 const lyrBomberos = L.layerGroup();
 const lyrAgua = L.layerGroup();
 const lyrHelis = L.layerGroup();
 const lyrNucleos = L.layerGroup();
+const lyrWind = L.layerGroup();
+const lyrTemp = L.layerGroup();
 
+/* Registro de capas: orden de la lista = orden de dibujo (la primera queda encima).
+   on = visible por defecto, op = transparencia por defecto. */
+const OVERLAYS = [
+  { id: 'firms',    label: '🔥 Focos FIRMS 24 h (FRP/confianza)',   layer: lyrFIRMS,     on: true,  op: 1 },
+  { id: 'munis',    label: '🚩 Municipios afectados/declarados',    layer: lyrMunis,     on: true,  op: 1 },
+  { id: 'eonet',    label: '📍 Incendios declarados (EONET)',       layer: lyrEONET,     on: true,  op: 1 },
+  { id: 'wind',     label: '🌬 Viento en superficie (Open-Meteo)',  layer: lyrWind,      on: false, op: 1 },
+  { id: 'temp',     label: '🌡 Temperaturas (Open-Meteo)',          layer: lyrTemp,      on: false, op: 1 },
+  { id: 'bomberos', label: '🚒 Parques de bomberos (OSM)',          layer: lyrBomberos,  on: false, op: 1 },
+  { id: 'agua',     label: '💧 Puntos de agua forestales (OSM)',    layer: lyrAgua,      on: false, op: 1 },
+  { id: 'helis',    label: '🚁 Helipuertos (OSM)',                  layer: lyrHelis,     on: false, op: 1 },
+  { id: 'nucleos',  label: '🏘 Núcleos de población (OSM)',         layer: lyrNucleos,   on: false, op: 1 },
+  { id: 'quakes',   label: '🌍 Sismos recientes (IGN/USGS)',        layer: lyrQuakes,    on: false, op: 1 },
+  { id: 'hs',       label: '🛰 Focos raster MODIS/VIIRS (EFFIS)',   layer: wmsHotspots,  on: true,  op: 1 },
+  { id: 'gibs',     label: '🌡 Anomalías térmicas VIIRS (NASA)',    layer: gibsThermal,  on: false, op: 1 },
+  { id: 'ba',       label: '⬛ Perímetros área quemada (EFFIS)',     layer: wmsBurnt,     on: false, op: 0.8 },
+  { id: 'limites',  label: '🗺 Límites municipales (IGN)',           layer: wmsMunicipios, on: false, op: 0.7 },
+  { id: 'fwi',      label: '🟠 Riesgo incendio hoy — FWI (EFFIS)',  layer: wmsFWI,       on: false, op: 0.55 },
+  { id: 'veg',      label: '🌿 Vegetación / ocupación suelo (IGN)', layer: wmsVegetacion, on: false, op: 0.6 },
+];
+
+/* Estado guardado del panel de capas (orden, visibilidad, transparencia) */
+try {
+  const saved = JSON.parse(localStorage.getItem('capas') || 'null');
+  if (saved && Array.isArray(saved.order)) {
+    OVERLAYS.sort((a, b) => {
+      const ia = saved.order.indexOf(a.id), ib = saved.order.indexOf(b.id);
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+    });
+    for (const o of OVERLAYS) {
+      const st = saved.state && saved.state[o.id];
+      if (st) { o.on = !!st.on; o.op = typeof st.op === 'number' ? st.op : o.op; }
+    }
+  }
+} catch (e) {}
+function saveCapas() {
+  try {
+    localStorage.setItem('capas', JSON.stringify({
+      order: OVERLAYS.map(o => o.id),
+      state: Object.fromEntries(OVERLAYS.map(o => [o.id, { on: o.on, op: o.op }])),
+    }));
+  } catch (e) {}
+}
+function applyCapas() {
+  OVERLAYS.forEach((o, i) => {
+    const pane = map.getPane('pane_' + o.id);
+    if (pane) { pane.style.zIndex = 458 - i * 2; pane.style.opacity = o.op; }
+    const has = map.hasLayer(o.layer);
+    if (o.on && !has) map.addLayer(o.layer);
+    if (!o.on && has) map.removeLayer(o.layer);
+  });
+}
+
+/* Panel 🗂 Capas: activar, subir/bajar y transparencia por capa */
+const capasCtl = L.control({ position: 'topright' });
+capasCtl.onAdd = () => {
+  const d = L.DomUtil.create('div', 'capas-panel');
+  L.DomEvent.disableClickPropagation(d);
+  L.DomEvent.disableScrollPropagation(d);
+  d.innerHTML = '<div class="capas-head" id="capas-head">🗂 Capas <span style="float:right" id="capas-arrow">▾</span></div><div id="capas-list"></div>';
+  return d;
+};
+capasCtl.addTo(map);
+function renderCapas() {
+  const list = document.getElementById('capas-list');
+  if (!list) return;
+  list.innerHTML = OVERLAYS.map((o, i) => `
+    <div class="capa-row">
+      <div class="fila1">
+        <input type="checkbox" data-id="${o.id}" data-act="on" ${o.on ? 'checked' : ''}>
+        <span class="capa-name" title="${esc(o.label)}">${esc(o.label)}</span>
+        <button data-id="${o.id}" data-act="up" title="Subir" ${i === 0 ? 'disabled' : ''}>▲</button>
+        <button data-id="${o.id}" data-act="down" title="Bajar" ${i === OVERLAYS.length - 1 ? 'disabled' : ''}>▼</button>
+      </div>
+      <input type="range" min="10" max="100" value="${Math.round(o.op * 100)}" data-id="${o.id}" data-act="op" title="Transparencia: ${Math.round(o.op * 100)}%">
+    </div>`).join('');
+}
+document.addEventListener('click', e => {
+  if (e.target.id === 'capas-head' || e.target.id === 'capas-arrow') {
+    const list = document.getElementById('capas-list');
+    const hidden = list.style.display === 'none';
+    list.style.display = hidden ? '' : 'none';
+    document.getElementById('capas-arrow').textContent = hidden ? '▾' : '▸';
+    return;
+  }
+  const btn = e.target.closest('#capas-list button');
+  if (!btn) return;
+  const i = OVERLAYS.findIndex(o => o.id === btn.dataset.id);
+  const j = btn.dataset.act === 'up' ? i - 1 : i + 1;
+  if (i < 0 || j < 0 || j >= OVERLAYS.length) return;
+  [OVERLAYS[i], OVERLAYS[j]] = [OVERLAYS[j], OVERLAYS[i]];
+  applyCapas(); renderCapas(); saveCapas();
+});
+document.addEventListener('input', e => {
+  const el = e.target;
+  if (!el.dataset || !el.dataset.id || !el.closest('#capas-list')) return;
+  const o = OVERLAYS.find(x => x.id === el.dataset.id);
+  if (!o) return;
+  if (el.dataset.act === 'on') { o.on = el.checked; applyCapas(); scheduleDynamic(); }
+  if (el.dataset.act === 'op') { o.op = el.value / 100; applyCapas(); }
+  saveCapas();
+});
+
+/* El selector estándar queda solo para los mapas base */
 L.control.layers(
   { 'CARTO oscuro': baseDark, 'OpenStreetMap': baseOSM, 'IGN Base': baseIGN, 'PNOA satélite (IGN)': basePNOA },
-  {
-    '🔥 Focos FIRMS 24 h (FRP/confianza)': lyrFIRMS,
-    '🚩 Municipios afectados/declarados': lyrMunis,
-    '📍 Incendios declarados (NASA EONET)': lyrEONET,
-    '🟠 Riesgo de incendio hoy — FWI (EFFIS)': wmsFWI,
-    '🛰 Focos raster MODIS/VIIRS (EFFIS)': wmsHotspots,
-    '⬛ Perímetros área quemada, temporada (EFFIS)': wmsBurnt,
-    '🌡 Anomalías térmicas VIIRS ayer (NASA)': gibsThermal,
-    '🗺 Límites municipales (IGN)': wmsMunicipios,
-    '🚒 Parques de bomberos (OSM)': lyrBomberos,
-    '💧 Puntos de agua forestales (OSM)': lyrAgua,
-    '🚁 Helipuertos (OSM)': lyrHelis,
-    '🏘 Núcleos de población (OSM)': lyrNucleos,
-    '🌍 Sismos recientes (IGN/USGS)': lyrQuakes,
-  },
-  { collapsed: true }
+  null, { collapsed: true }
 ).addTo(map);
+
+/* ================= BUSCADOR (población / incendio declarado) ================= */
+const buscarCtl = L.control({ position: 'topleft' });
+buscarCtl.onAdd = () => {
+  const d = L.DomUtil.create('div', 'buscar-panel');
+  L.DomEvent.disableClickPropagation(d);
+  L.DomEvent.disableScrollPropagation(d);
+  d.innerHTML = `
+    <div class="buscar-fila">
+      <input type="text" id="buscar-q" placeholder="Población o incendio (ej.: IF Córdoba)…">
+      <button id="buscar-pob" title="Ir a la población">📍</button>
+      <button id="buscar-inc" title="Buscar incendio declarado (IF …) en noticias 48 h">🔥</button>
+    </div>
+    <div id="buscar-res" hidden></div>`;
+  return d;
+};
+buscarCtl.addTo(map);
+
+let searchMarker = null;
+function pinBusqueda(lat, lon, label) {
+  if (searchMarker) map.removeLayer(searchMarker);
+  searchMarker = L.marker([lat, lon], { icon: L.divIcon({ className: '', html: '<div style="font-size:26px;line-height:26px">🎯</div>', iconSize: [26, 26], iconAnchor: [13, 24] }) })
+    .bindPopup(`<b>🎯 ${esc(label)}</b>`).addTo(map);
+  searchMarker.openPopup();
+}
+async function buscarPoblacion() {
+  const term = document.getElementById('buscar-q').value.trim();
+  if (!term) return;
+  const res = document.getElementById('buscar-res');
+  res.hidden = false; res.innerHTML = '<div class="buscar-item">Buscando población…</div>';
+  const pos = await geocode(`${term}, España`);
+  if (!pos) { res.innerHTML = '<div class="buscar-item">No se encontró esa población.</div>'; return; }
+  res.hidden = true;
+  map.flyTo([pos.lat, pos.lon], 12);
+  pinBusqueda(pos.lat, pos.lon, term);
+}
+async function buscarIncendio() {
+  const term = document.getElementById('buscar-q').value.trim();
+  if (!term) return;
+  const res = document.getElementById('buscar-res');
+  res.hidden = false; res.innerHTML = '<div class="buscar-item">Buscando incendios declarados…</div>';
+  /* INFOCA y otros dispositivos nombran los incendios "IF <municipio> (<provincia>)" */
+  const clean = term.replace(/^if\s+/i, '');
+  const query = `"IF ${clean}" OR "incendio forestal ${clean}" OR "incendio en ${clean}" when:2d`;
+  try {
+    const items = parseFeed(await fetchText(gnewsUrl(query), { mode: 'proxy' })).slice(0, 8);
+    res.innerHTML = items.length
+      ? items.map(it => {
+          const m = it.title.match(/^(.*)\s+-\s+([^-]+)$/);
+          return `<div class="buscar-item"><a href="${esc(it.link)}" target="_blank" rel="noopener">${esc(m ? m[1] : it.title)}</a><span> · ${fmtTime(it.date)}</span></div>`;
+        }).join('') + `<div class="buscar-item"><a href="https://x.com/search?q=${encodeURIComponent('"IF ' + clean + '"')}&f=live" target="_blank" rel="noopener">🔎 Ver "IF ${esc(clean)}" en X (en vivo)</a></div>`
+      : `<div class="buscar-item">Sin noticias en 48 h para «${esc(clean)}». Prueba en <a href="https://x.com/search?q=${encodeURIComponent('"IF ' + clean + '"')}&f=live" target="_blank" rel="noopener">X en vivo</a>.</div>`;
+  } catch (e) {
+    res.innerHTML = '<div class="buscar-item">No se pudo buscar (feed no disponible).</div>';
+  }
+  const pos = await geocode(`${clean}, España`);
+  if (pos) { map.flyTo([pos.lat, pos.lon], 10); pinBusqueda(pos.lat, pos.lon, 'IF ' + clean); }
+}
+document.addEventListener('click', e => {
+  if (e.target.id === 'buscar-pob') buscarPoblacion();
+  if (e.target.id === 'buscar-inc') buscarIncendio();
+});
+document.addEventListener('keydown', e => {
+  if (e.target.id === 'buscar-q' && e.key === 'Enter') buscarPoblacion();
+});
 
 /* Leyenda de focos FIRMS */
 const legend = L.control({ position: 'bottomleft' });
@@ -444,7 +640,6 @@ async function loadFIRMS() {
   }
   if (!okAny) { setSource('firms', 'err'); return; }
 
-  lyrFIRMS.clearLayers();
   firmsPoints = [];
   const now = Date.now();
   for (const r of all) {
@@ -455,23 +650,59 @@ async function loadFIRMS() {
     const hhmm = String(r.acq_time || '0').padStart(4, '0');
     const when = new Date(`${r.acq_date}T${hhmm.slice(0, 2)}:${hhmm.slice(2)}:00Z`);
     const ageH = (now - when.getTime()) / 36e5;
-    firmsPoints.push({ lat, lon, frp, when });
-    L.circleMarker([lat, lon], {
-      radius: 4 + Math.min(14, Math.sqrt(frp || 1) * 2),
-      color: CONF_COLOR[conf] || '#fb923c', weight: 1,
-      fillColor: CONF_COLOR[conf] || '#fb923c',
-      fillOpacity: ageH <= 6 ? 0.75 : 0.35, opacity: ageH <= 6 ? 0.95 : 0.5,
-    }).bindPopup(
-      `<b>🔥 Foco ${esc(r.instrument || 'VIIRS')}/${esc(r.satellite || '')}</b><br>` +
-      `FRP: <b>${frp.toFixed(1)} MW</b> · confianza: <b>${esc(conf || '?')}</b><br>` +
-      `Detección: ${when.toLocaleString('es-ES')}<br>` +
-      `${lat.toFixed(4)}, ${lon.toFixed(4)}`
-    ).addTo(lyrFIRMS);
+    firmsPoints.push({ lat, lon, frp, conf, when, ageH, sat: r.satellite || '', instr: r.instrument || 'VIIRS' });
   }
   document.getElementById('firms-count').textContent = firmsPoints.length;
+  renderFirms();
   setSource('firms', 'ok');
   checkProximity();
 }
+
+const CONF_RANK = { h: 2, high: 2, n: 1, nominal: 1, l: 0, low: 0 };
+function firmsMarker(f) {
+  return L.circleMarker([f.lat, f.lon], { pane: 'pane_firms',
+    radius: 4 + Math.min(14, Math.sqrt(f.frp || 1) * 2),
+    color: CONF_COLOR[f.conf] || '#fb923c', weight: 1,
+    fillColor: CONF_COLOR[f.conf] || '#fb923c',
+    fillOpacity: f.ageH <= 6 ? 0.75 : 0.35, opacity: f.ageH <= 6 ? 0.95 : 0.5,
+  }).bindPopup(
+    `<b>🔥 Foco ${esc(f.instr)}/${esc(f.sat)}</b><br>` +
+    `FRP: <b>${f.frp.toFixed(1)} MW</b> · confianza: <b>${esc(f.conf || '?')}</b><br>` +
+    `Detección: ${f.when.toLocaleString('es-ES')}<br>` +
+    `${f.lat.toFixed(4)}, ${f.lon.toFixed(4)}`);
+}
+/* A zoom lejano los focos se agrupan en una rejilla (círculo con recuento);
+   al acercar el zoom se separan en puntos individuales. */
+function renderFirms() {
+  lyrFIRMS.clearLayers();
+  if (!firmsPoints.length) return;
+  const z = map.getZoom();
+  if (z >= 10) { for (const f of firmsPoints) firmsMarker(f).addTo(lyrFIRMS); return; }
+  const cell = z <= 5 ? 0.8 : z <= 6 ? 0.4 : z <= 7 ? 0.22 : z <= 8 ? 0.12 : 0.07;
+  const buckets = new Map();
+  for (const f of firmsPoints) {
+    const k = Math.round(f.lat / cell) + '_' + Math.round(f.lon / cell);
+    if (!buckets.has(k)) buckets.set(k, []);
+    buckets.get(k).push(f);
+  }
+  for (const group of buckets.values()) {
+    if (group.length === 1) { firmsMarker(group[0]).addTo(lyrFIRMS); continue; }
+    const lat = group.reduce((s, f) => s + f.lat, 0) / group.length;
+    const lon = group.reduce((s, f) => s + f.lon, 0) / group.length;
+    const frpSum = group.reduce((s, f) => s + f.frp, 0);
+    let worst = group[0].conf;
+    for (const f of group) if ((CONF_RANK[f.conf] || 0) > (CONF_RANK[worst] || 0)) worst = f.conf;
+    const col = CONF_COLOR[worst] || '#fb923c';
+    const size = Math.min(46, 24 + Math.round(Math.sqrt(group.length) * 4));
+    const recent = group.some(f => f.ageH <= 6);
+    const mk = L.marker([lat, lon], { pane: 'pane_firms', icon: L.divIcon({ className: '', iconSize: [size, size], iconAnchor: [size / 2, size / 2],
+      html: `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${col}${recent ? 'cc' : '66'};border:2px solid ${col};color:#0d1117;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:12px">${group.length}</div>` }) })
+      .bindPopup(`<b>🔥 ${group.length} focos agrupados</b><br>FRP total: <b>${frpSum.toFixed(0)} MW</b><br>Peor confianza: ${esc(worst || '?')}<br>Doble clic en el círculo (o acerca el zoom) para separarlos.`);
+    mk.on('dblclick', () => map.setView([lat, lon], Math.min(12, map.getZoom() + 3)));
+    mk.addTo(lyrFIRMS);
+  }
+}
+map.on('zoomend', renderFirms);
 
 /* ================= AVISO DE PROXIMIDAD ================= */
 let userPos = null, userMarker = null;
@@ -524,7 +755,7 @@ const RE_FORESTAL = /forestal|infoca|cedefo|brif|ret[eé]n|incendio|infoma/i;
 
 const OSM_LAYERS = [
   {
-    layer: lyrBomberos, minZoom: 8,
+    layer: lyrBomberos, pane: 'pane_bomberos', minZoom: 8,
     build: bb => `[out:json][timeout:25];nwr["amenity"="fire_station"](${bb});out center 400;`,
     render: el => {
       const name = (el.tags && el.tags.name) || 'Parque de bomberos';
@@ -534,7 +765,7 @@ const OSM_LAYERS = [
     },
   },
   {
-    layer: lyrAgua, minZoom: 9,
+    layer: lyrAgua, pane: 'pane_agua', minZoom: 9,
     build: (bb, z) => `[out:json][timeout:25];(
       nwr["emergency"~"^(fire_water_pond|water_tank|suction_point)$"](${bb});
       ${z >= 14 ? `node["emergency"="fire_hydrant"](${bb});` : ''}
@@ -547,12 +778,12 @@ const OSM_LAYERS = [
     },
   },
   {
-    layer: lyrHelis, minZoom: 8,
+    layer: lyrHelis, pane: 'pane_helis', minZoom: 8,
     build: bb => `[out:json][timeout:25];nwr["aeroway"="helipad"](${bb});out center 300;`,
     render: el => ({ icon: '🚁', size: 18, pop: `<b>Helipuerto</b>${el.tags && el.tags.name ? '<br>' + esc(el.tags.name) : ''}` }),
   },
   {
-    layer: lyrNucleos, minZoom: 10,
+    layer: lyrNucleos, pane: 'pane_nucleos', minZoom: 10,
     build: bb => `[out:json][timeout:25];node["place"~"^(town|village|hamlet)$"](${bb});out 600;`,
     render: el => {
       const t = el.tags || {};
@@ -580,7 +811,7 @@ async function refreshOSMLayers() {
         const lon = el.lon != null ? el.lon : (el.center && el.center.lon);
         if (lat == null) continue;
         const r = def.render(el);
-        L.marker([lat, lon], { icon: L.divIcon({ className: '', html: `<div style="font-size:${r.size}px;line-height:${r.size}px">${r.icon}</div>`, iconSize: [r.size, r.size], iconAnchor: [r.size / 2, r.size / 2] }) })
+        L.marker([lat, lon], { pane: def.pane, icon: L.divIcon({ className: '', html: `<div style="font-size:${r.size}px;line-height:${r.size}px">${r.icon}</div>`, iconSize: [r.size, r.size], iconAnchor: [r.size / 2, r.size / 2] }) })
           .bindPopup(r.pop + '<br><span style="color:#647085;font-size:11px">Fuente: OpenStreetMap · acerca el zoom para más detalle</span>').addTo(def.layer);
       }
       okAny = true;
@@ -588,7 +819,52 @@ async function refreshOSMLayers() {
   }
   setSource('osm', okAny || gated ? 'ok' : 'err');
 }
-map.on('moveend overlayadd', () => { clearTimeout(osmTimer); osmTimer = setTimeout(refreshOSMLayers, 700); });
+/* Recarga diferida de capas dinámicas (OSM y rejilla meteo) al mover el mapa o activarlas */
+let meteoTimer = null;
+function scheduleDynamic() {
+  clearTimeout(osmTimer); osmTimer = setTimeout(refreshOSMLayers, 700);
+  clearTimeout(meteoTimer); meteoTimer = setTimeout(refreshMeteoLayers, 700);
+}
+map.on('moveend', scheduleDynamic);
+
+/* ================= VIENTO Y TEMPERATURA SOBRE EL MAPA (rejilla Open-Meteo) ================= */
+async function refreshMeteoLayers() {
+  const wOn = map.hasLayer(lyrWind), tOn = map.hasLayer(lyrTemp);
+  if (!wOn && !tOn) return;
+  setSource('meteomapa', 'load');
+  try {
+    const b = map.getBounds();
+    const pts = [];
+    for (let i = 0; i <= 5; i++) for (let j = 0; j <= 7; j++)
+      pts.push([b.getSouth() + (b.getNorth() - b.getSouth()) * i / 5, b.getWest() + (b.getEast() - b.getWest()) * j / 7]);
+    const jr = JSON.parse(await fetchText(
+      `https://api.open-meteo.com/v1/forecast?latitude=${pts.map(p => p[0].toFixed(3)).join(',')}&longitude=${pts.map(p => p[1].toFixed(3)).join(',')}&current=temperature_2m,wind_speed_10m,wind_direction_10m,wind_gusts_10m`,
+      { mode: 'auto' }));
+    const arr = Array.isArray(jr) ? jr : [jr];
+    lyrWind.clearLayers(); lyrTemp.clearLayers();
+    arr.forEach((r, ix) => {
+      const c = r && r.current; if (!c || !pts[ix]) return;
+      const [la, lo] = pts[ix];
+      if (wOn) {
+        const spd = c.wind_speed_10m, g = c.wind_gusts_10m || spd, dir = c.wind_direction_10m || 0;
+        const col = g > 50 ? '#f87171' : g > 30 ? '#fb923c' : g > 20 ? '#fbbf24' : '#9aa7b8';
+        L.marker([la, lo], { pane: 'pane_wind', icon: L.divIcon({ className: '', iconSize: [34, 30], iconAnchor: [17, 15],
+          html: `<div style="transform:rotate(${(dir + 180) % 360}deg);color:${col};font-size:18px;line-height:16px;text-align:center">↑</div><div style="font-size:9px;color:${col};text-align:center;text-shadow:0 0 3px #000">${Math.round(spd)}</div>` }) })
+          .bindPopup(`<b>🌬 Viento</b><br>Medio: ${Math.round(spd)} km/h · Racha: ${Math.round(g)} km/h<br>Origen: ${Math.round(dir)}° (la flecha indica hacia dónde sopla)`)
+          .addTo(lyrWind);
+      }
+      if (tOn) {
+        const t = c.temperature_2m;
+        const col = t > 35 ? '#f87171' : t > 30 ? '#fb923c' : t > 25 ? '#fbbf24' : '#4ade80';
+        L.marker([la, lo], { pane: 'pane_temp', icon: L.divIcon({ className: '', iconSize: [30, 16], iconAnchor: [15, 8],
+          html: `<div style="color:${col};font-weight:700;font-size:12px;text-align:center;text-shadow:0 0 4px #000">${t.toFixed(0)}°</div>` }) })
+          .bindPopup(`<b>🌡 Temperatura</b><br>${t.toFixed(1)} °C`)
+          .addTo(lyrTemp);
+      }
+    });
+    setSource('meteomapa', 'ok');
+  } catch (e) { setSource('meteomapa', 'err'); }
+}
 
 /* ================= NOTICIAS (Google News RSS) ================= */
 function gnewsUrl(query) {
@@ -677,7 +953,7 @@ function renderMunis() {
   lyrMunis.clearLayers();
   for (const [name, st] of muniState) {
     if (!st.pos) continue;
-    L.marker([st.pos.lat, st.pos.lon], { icon: L.divIcon({ className: '', html: '<div style="font-size:24px;line-height:24px">🚩</div>', iconSize: [24, 24], iconAnchor: [12, 22] }) })
+    L.marker([st.pos.lat, st.pos.lon], { pane: 'pane_munis', icon: L.divIcon({ className: '', html: '<div style="font-size:24px;line-height:24px">🚩</div>', iconSize: [24, 24], iconAnchor: [12, 22] }) })
       .bindPopup(`<b>🚩 ${esc(name)}</b><br>${st.source === 'manual' ? 'Declarado por el operador (fuente: X Delegación del Gobierno)' : 'Citado en titulares de noticias de la emergencia'}`)
       .addTo(lyrMunis);
   }
@@ -733,7 +1009,7 @@ async function loadEONET() {
       const g = ev.geometry && ev.geometry[ev.geometry.length - 1];
       if (!g || !g.coordinates) continue;
       const [lon, lat] = g.coordinates;
-      L.marker([lat, lon], { icon: L.divIcon({ className: '', html: '<div style="font-size:22px;line-height:22px">📍</div>', iconSize: [22, 22], iconAnchor: [11, 20] }) })
+      L.marker([lat, lon], { pane: 'pane_eonet', icon: L.divIcon({ className: '', html: '<div style="font-size:22px;line-height:22px">📍</div>', iconSize: [22, 22], iconAnchor: [11, 20] }) })
         .bindPopup(`<b>${esc(ev.title)}</b><br>Declarado: ${fmtTime(g.date)}<br><a href="${esc((ev.sources && ev.sources[0] && ev.sources[0].url) || '#')}" target="_blank" rel="noopener">fuente</a>`)
         .addTo(lyrEONET);
     }
@@ -774,7 +1050,7 @@ async function loadQuakes() {
   for (const r of rows) {
     if (isNaN(r.lat) || isNaN(r.lon)) continue;
     const mag = r.mag || 2;
-    L.circleMarker([r.lat, r.lon], { radius: 3 + mag * 2, color: '#58a6ff', weight: 1.5, fillOpacity: 0.35 })
+    L.circleMarker([r.lat, r.lon], { pane: 'pane_quakes', radius: 3 + mag * 2, color: '#58a6ff', weight: 1.5, fillOpacity: 0.35 })
       .bindPopup(`<b>${esc(r.title)}</b><br>${fmtTime(r.date)} · ${r.src}`).addTo(lyrQuakes);
   }
 }
@@ -830,6 +1106,18 @@ function renderX() {
   pane.innerHTML = h;
 }
 
+/* ================= VISOR WINDY EMBEBIDO ================= */
+function renderWindy(ov) {
+  const pane = document.getElementById('p-windy');
+  pane.innerHTML = `<div class="windy-btns">` +
+    [['wind', '🌬 Viento'], ['gust', '💨 Rachas'], ['temp', '🌡 Temperatura'], ['rh', '💦 Humedad']]
+      .map(([k, l]) => `<button data-ov="${k}" class="${k === ov ? 'active' : ''}">${l}</button>`).join('') +
+    `</div>
+    <iframe src="https://embed.windy.com/embed.html?type=map&location=coordinates&metricWind=km%2Fh&metricTemp=%C2%B0C&lat=40.2&lon=-4.0&zoom=6&overlay=${ov}&level=surface&menu=false&message=false&marker=false&calendar=now" loading="lazy"></iframe>
+    <div class="nota">Visor <a href="https://www.windy.com/?40.2,-4.0,6" target="_blank" rel="noopener">Windy.com</a> embebido con animación. Complementa las capas 🌬 Viento y 🌡 Temperaturas del mapa principal (panel 🗂 Capas).</div>`;
+  pane.querySelectorAll('.windy-btns button').forEach(b => b.addEventListener('click', () => renderWindy(b.dataset.ov)));
+}
+
 /* ================= ORQUESTACIÓN ================= */
 async function refreshNews() {
   const madridItems = await loadNews('news-madrid', 'gn-madrid', CONFIG.queries.madrid);
@@ -838,7 +1126,7 @@ async function refreshNews() {
   loadNews('p-pcivil', 'gn-pcivil', CONFIG.queries.pcivil);
 }
 function refreshData() {
-  loadAvisos(); loadEONET(); loadQuakes(); load303030();
+  loadAvisos(); loadEONET(); loadQuakes(); load303030(); refreshMeteoLayers();
   for (const w of [wmsHotspots, wmsBurnt, wmsFWI]) { if (map.hasLayer(w)) w.setParams({ _t: Date.now() }); }
 }
 function refreshAll() { refreshNews(); refreshData(); loadFIRMS(); refreshOSMLayers(); }
@@ -853,9 +1141,12 @@ regSource('sismos', 'Sismos');
 regSource('meteo', 'Meteo 30-30-30');
 regSource('osm', 'OSM equipamientos');
 regSource('geo', 'Geocodificación');
-setSource('osm', 'ok'); setSource('geo', 'ok'); // pasivas hasta que se usan
+regSource('meteomapa', 'Viento/T mapa');
+setSource('osm', 'ok'); setSource('geo', 'ok'); setSource('meteomapa', 'ok'); // pasivas hasta que se usan
 
 renderX();
+applyCapas();
+renderCapas();
 refreshAll();
 setInterval(refreshNews, CONFIG.refreshNewsMin * 60 * 1000);
 setInterval(refreshData, CONFIG.refreshDataMin * 60 * 1000);
@@ -865,6 +1156,7 @@ document.getElementById('tabs').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('active', x === b));
   document.querySelectorAll('.tabpane').forEach(p => p.classList.toggle('active', p.id === b.dataset.pane));
+  if (b.dataset.pane === 'p-windy' && !document.querySelector('#p-windy iframe')) renderWindy('wind');
 });
 setInterval(() => { document.getElementById('clock').textContent = new Date().toLocaleTimeString('es-ES'); }, 1000);
 document.getElementById('btn-refresh').addEventListener('click', refreshAll);
