@@ -120,6 +120,9 @@
   .capas-head{padding:6px 10px; font-weight:700; border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--panel2); cursor:pointer;}
   .capa-row{padding:5px 8px 6px; border-bottom:1px solid var(--border);}
   .capa-row .fila1{display:flex; align-items:center; gap:5px;}
+  .capa-row.dragover{border-top:2px solid var(--accent);}
+  .drag-handle{cursor:grab; color:var(--ink3); font-size:11px; user-select:none;}
+  .drag-handle:active{cursor:grabbing;}
   .capa-row .capa-name{flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ink2);}
   .capa-row input[type=checkbox]{accent-color:var(--accent);}
   .capa-row button{background:var(--panel); color:var(--ink2); border:1px solid var(--border); border-radius:4px; cursor:pointer; font-size:9px; padding:1px 4px;}
@@ -486,8 +489,9 @@ function renderCapas() {
   const list = document.getElementById('capas-list');
   if (!list) return;
   list.innerHTML = OVERLAYS.map((o, i) => `
-    <div class="capa-row">
+    <div class="capa-row" data-row="${o.id}">
       <div class="fila1">
+        <span class="drag-handle" draggable="true" title="Arrastra para reordenar">⠿</span>
         <input type="checkbox" data-id="${o.id}" data-act="on" ${o.on ? 'checked' : ''}>
         <span class="capa-name" title="${esc(o.label)}">${esc(o.label)}</span>
         <button data-id="${o.id}" data-act="up" title="Subir" ${i === 0 ? 'disabled' : ''}>▲</button>
@@ -496,6 +500,40 @@ function renderCapas() {
       <input type="range" min="10" max="100" value="${Math.round(o.op * 100)}" data-id="${o.id}" data-act="op" title="Transparencia: ${Math.round(o.op * 100)}%">
     </div>`).join('');
 }
+
+/* Arrastrar y soltar filas del panel de capas (además de los botones ▲▼) */
+let dragCapaId = null;
+document.addEventListener('dragstart', e => {
+  const h = e.target.closest ? e.target.closest('.drag-handle') : null;
+  if (!h) return;
+  const row = h.closest('.capa-row');
+  dragCapaId = row ? row.dataset.row : null;
+  if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dragCapaId || ''); }
+});
+document.addEventListener('dragover', e => {
+  const row = e.target.closest ? e.target.closest('.capa-row') : null;
+  if (!row || !dragCapaId) return;
+  e.preventDefault();
+  document.querySelectorAll('.capa-row.dragover').forEach(r => r.classList.remove('dragover'));
+  row.classList.add('dragover');
+});
+document.addEventListener('drop', e => {
+  const row = e.target.closest ? e.target.closest('.capa-row') : null;
+  if (!row || !dragCapaId) return;
+  e.preventDefault();
+  const from = OVERLAYS.findIndex(o => o.id === dragCapaId);
+  const to = OVERLAYS.findIndex(o => o.id === row.dataset.row);
+  if (from >= 0 && to >= 0 && from !== to) {
+    const [moved] = OVERLAYS.splice(from, 1);
+    OVERLAYS.splice(to, 0, moved);
+    applyCapas(); renderCapas(); saveCapas(); scheduleDynamic();
+  }
+  dragCapaId = null;
+});
+document.addEventListener('dragend', () => {
+  document.querySelectorAll('.capa-row.dragover').forEach(r => r.classList.remove('dragover'));
+  dragCapaId = null;
+});
 document.addEventListener('click', e => {
   if (e.target.id === 'capas-head' || e.target.id === 'capas-arrow') {
     const list = document.getElementById('capas-list');
@@ -522,6 +560,13 @@ document.addEventListener('input', e => {
   saveCapas();
 });
 
+/* Si una capa de teselas WMS/WMTS falla (p. ej. Copernicus renombra una capa),
+   el pie de página lo muestra en "Teselas WMS" en vez de fallar en silencio */
+for (const ly of [wmsFWI, wmsHotspots, wmsBurnt, wmsMunicipios, wmsVegetacion, gibsThermal]) {
+  ly.on('tileerror', () => setSource('wms', 'err'));
+  ly.on('load', () => setSource('wms', 'ok'));
+}
+
 /* El selector estándar queda solo para los mapas base */
 L.control.layers(
   { 'CARTO oscuro': baseDark, 'OpenStreetMap': baseOSM, 'IGN Base': baseIGN, 'PNOA satélite (IGN)': basePNOA },
@@ -545,6 +590,15 @@ buscarCtl.onAdd = () => {
 };
 buscarCtl.addTo(map);
 
+/* Normaliza el término: admite hashtags operativos tipo #IFSierraOeste
+   (quita #, separa "IF" y el CamelCase: "#IFSierraOeste" → "Sierra Oeste") */
+function parseTermino(raw) {
+  let t = raw.trim().replace(/^#/, '');
+  t = t.replace(/^IF(?=[A-ZÁÉÍÓÚÑa-záéíóúñ])/, 'IF ');
+  t = t.replace(/([a-záéíóúñü])([A-ZÁÉÍÓÚÑ])/g, '$1 $2');
+  return t.replace(/^IF\s+/i, '').trim();
+}
+
 let searchMarker = null;
 function pinBusqueda(lat, lon, label) {
   if (searchMarker) map.removeLayer(searchMarker);
@@ -553,7 +607,7 @@ function pinBusqueda(lat, lon, label) {
   searchMarker.openPopup();
 }
 async function buscarPoblacion() {
-  const term = document.getElementById('buscar-q').value.trim();
+  const term = parseTermino(document.getElementById('buscar-q').value);
   if (!term) return;
   const res = document.getElementById('buscar-res');
   res.hidden = false; res.innerHTML = '<div class="buscar-item">Buscando población…</div>';
@@ -564,23 +618,26 @@ async function buscarPoblacion() {
   pinBusqueda(pos.lat, pos.lon, term);
 }
 async function buscarIncendio() {
-  const term = document.getElementById('buscar-q').value.trim();
-  if (!term) return;
+  const raw = document.getElementById('buscar-q').value.trim();
+  if (!raw) return;
   const res = document.getElementById('buscar-res');
   res.hidden = false; res.innerHTML = '<div class="buscar-item">Buscando incendios declarados…</div>';
-  /* INFOCA y otros dispositivos nombran los incendios "IF <municipio> (<provincia>)" */
-  const clean = term.replace(/^if\s+/i, '');
+  /* INFOCA y otros dispositivos nombran los incendios "IF <lugar>" / "#IF<Lugar>" */
+  const clean = parseTermino(raw);
+  const xQuery = raw.startsWith('#') ? raw : `"IF ${clean}"`;
+  const xLink = `https://x.com/search?q=${encodeURIComponent(xQuery)}&f=live`;
   const query = `"IF ${clean}" OR "incendio forestal ${clean}" OR "incendio en ${clean}" when:2d`;
   try {
     const items = parseFeed(await fetchText(gnewsUrl(query), { mode: 'proxy' })).slice(0, 8);
-    res.innerHTML = items.length
+    res.innerHTML = (items.length
       ? items.map(it => {
           const m = it.title.match(/^(.*)\s+-\s+([^-]+)$/);
           return `<div class="buscar-item"><a href="${esc(it.link)}" target="_blank" rel="noopener">${esc(m ? m[1] : it.title)}</a><span> · ${fmtTime(it.date)}</span></div>`;
-        }).join('') + `<div class="buscar-item"><a href="https://x.com/search?q=${encodeURIComponent('"IF ' + clean + '"')}&f=live" target="_blank" rel="noopener">🔎 Ver "IF ${esc(clean)}" en X (en vivo)</a></div>`
-      : `<div class="buscar-item">Sin noticias en 48 h para «${esc(clean)}». Prueba en <a href="https://x.com/search?q=${encodeURIComponent('"IF ' + clean + '"')}&f=live" target="_blank" rel="noopener">X en vivo</a>.</div>`;
+        }).join('')
+      : `<div class="buscar-item">Sin noticias en 48 h para «${esc(clean)}».</div>`)
+      + `<div class="buscar-item"><a href="${xLink}" target="_blank" rel="noopener">🔎 Ver ${esc(xQuery)} en X (en vivo)</a></div>`;
   } catch (e) {
-    res.innerHTML = '<div class="buscar-item">No se pudo buscar (feed no disponible).</div>';
+    res.innerHTML = `<div class="buscar-item">No se pudo buscar en noticias. Prueba en <a href="${xLink}" target="_blank" rel="noopener">X en vivo</a>.</div>`;
   }
   const pos = await geocode(`${clean}, España`);
   if (pos) { map.flyTo([pos.lat, pos.lon], 10); pinBusqueda(pos.lat, pos.lon, 'IF ' + clean); }
@@ -590,7 +647,10 @@ document.addEventListener('click', e => {
   if (e.target.id === 'buscar-inc') buscarIncendio();
 });
 document.addEventListener('keydown', e => {
-  if (e.target.id === 'buscar-q' && e.key === 'Enter') buscarPoblacion();
+  if (e.target.id === 'buscar-q' && e.key === 'Enter') {
+    /* con # o "IF ..." se interpreta como incendio declarado; si no, como población */
+    if (/^#|^if\b/i.test(e.target.value.trim())) buscarIncendio(); else buscarPoblacion();
+  }
 });
 
 /* Leyenda de focos FIRMS */
@@ -1142,7 +1202,8 @@ regSource('meteo', 'Meteo 30-30-30');
 regSource('osm', 'OSM equipamientos');
 regSource('geo', 'Geocodificación');
 regSource('meteomapa', 'Viento/T mapa');
-setSource('osm', 'ok'); setSource('geo', 'ok'); setSource('meteomapa', 'ok'); // pasivas hasta que se usan
+regSource('wms', 'Teselas WMS');
+setSource('osm', 'ok'); setSource('geo', 'ok'); setSource('meteomapa', 'ok'); setSource('wms', 'ok'); // pasivas hasta que se usan
 
 renderX();
 applyCapas();
