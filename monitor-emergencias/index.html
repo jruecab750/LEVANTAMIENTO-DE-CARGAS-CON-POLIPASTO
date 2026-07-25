@@ -219,7 +219,7 @@ const CONFIG = {
   /* Zonas y predicción de avance (estimación docente) */
   clusterKm: 2.5,    // distancia máx. entre focos para considerarlos la misma zona
   predHoras: 3,      // horizonte de la predicción de avance
-  predMaxZonas: 6,   // nº máximo de zonas a las que calcular predicción
+  predMaxZonas: 8,   // nº máximo de zonas a las que calcular predicción (prioriza la vista actual)
 
   queries: {
     madrid: 'incendio forestal Madrid OR "nivel 3" OR INFOMA OR Guadarrama when:2d',
@@ -391,8 +391,11 @@ const PANE_IDS = ['pred','firms','munis','eonet','wind','temp','bomberos','agua'
 for (const id of PANE_IDS) map.createPane('pane_' + id);
 
 const EFFIS = 'https://maps.effis.emergency.copernicus.eu/effis';
+const EFFIS_MIRROR = 'https://ies-ows.jrc.ec.europa.eu/effis';
+const hoyISO = new Date().toISOString().slice(0, 10);
 const wmsFWI = L.tileLayer.wms(EFFIS, { pane: 'pane_fwi',
   layers: 'ecmwf007.fwi', format: 'image/png', transparent: true,
+  time: hoyISO, /* los pronósticos FWI exigen fecha: sin TIME el servidor puede devolver vacío */
   attribution: 'EFFIS © Copernicus', version: '1.1.1' });
 const wmsHotspots = L.tileLayer.wms(EFFIS, { pane: 'pane_hs',
   layers: 'modis.hs,viirs.hs', format: 'image/png', transparent: true,
@@ -577,11 +580,16 @@ document.addEventListener('input', e => {
   saveCapas();
 });
 
-/* Si una capa de teselas WMS/WMTS falla (p. ej. Copernicus renombra una capa),
-   el pie de página lo muestra en "Teselas WMS" en vez de fallar en silencio */
-for (const ly of [wmsFWI, wmsHotspots, wmsBurnt, wmsMunicipios, wmsVegetacion, gibsThermal]) {
-  ly.on('tileerror', () => setSource('wms', 'err'));
-  ly.on('load', () => setSource('wms', 'ok'));
+/* Si una capa de teselas WMS/WMTS falla, el pie de página lo muestra NOMBRANDO la capa;
+   las capas EFFIS además conmutan al espejo del JRC tras 3 errores */
+for (const [nombre, ly] of [['FWI', wmsFWI], ['Focos EFFIS', wmsHotspots], ['Área quemada', wmsBurnt], ['Límites IGN', wmsMunicipios], ['Vegetación', wmsVegetacion], ['GIBS', gibsThermal]]) {
+  let errs = 0;
+  ly.on('tileerror', () => {
+    errs++;
+    if (SOURCES.wms) { SOURCES.wms.label = 'Teselas WMS (falla: ' + nombre + ')'; setSource('wms', 'err'); }
+    if (errs === 3 && [wmsFWI, wmsHotspots, wmsBurnt].includes(ly) && ly.setUrl) ly.setUrl(EFFIS_MIRROR);
+  });
+  ly.on('load', () => { if (!errs && SOURCES.wms) { SOURCES.wms.label = 'Teselas WMS'; setSource('wms', 'ok'); } });
 }
 
 /* El selector estándar queda solo para los mapas base */
@@ -756,8 +764,13 @@ legend.onAdd = () => {
     <span class="lg-dot" style="background:#fb923c"></span>nominal
     <span class="lg-dot" style="background:#fbbf24"></span>baja<br>
     Opacidad menor = detección &gt; 6 h<br>
-    <span style="color:#ef4444">▬</span> zona de focos ·
-    <span style="color:#fbbf24">▬ ▬</span> avance estimado +3 h`;
+    <span style="color:#ff3b30">▬</span> zona de focos ·
+    <span style="color:#ffd60a">▬ ▬</span> avance estimado +3 h<br>
+    <b>Viento (partículas)</b><br>
+    <span class="lg-dot" style="background:#9fc7f5"></span>&lt;20
+    <span class="lg-dot" style="background:#ffe066"></span>20-30
+    <span class="lg-dot" style="background:#ff9f43"></span>30-50
+    <span class="lg-dot" style="background:#ff5b5b"></span>&gt;50 km/h`;
   return d;
 };
 legend.addTo(map);
@@ -958,15 +971,21 @@ async function buildPrediction() {
   if (!firmsPoints.length) { lyrPred.clearLayers(); setSource('pred', 'ok'); return; }
   setSource('pred', 'load');
   try {
-    const zonas = clusterFirms(firmsPoints, CONFIG.clusterKm)
+    const todas = clusterFirms(firmsPoints, CONFIG.clusterKm)
       .filter(c => c.length >= 2)
       .sort((a, b) => b.length - a.length)
-      .slice(0, CONFIG.predMaxZonas)
       .map(c => {
         const lat = c.reduce((s, f) => s + f.lat, 0) / c.length;
         const lon = c.reduce((s, f) => s + f.lon, 0) / c.length;
         return { focos: c, lat, lon };
       });
+    /* prioridad a las zonas dentro de la vista actual del mapa; el resto rellena hasta el máximo */
+    const vista = map.getBounds();
+    const zonas = todas.filter(z => vista.contains(L.latLng(z.lat, z.lon))).slice(0, CONFIG.predMaxZonas);
+    for (const z of todas) {
+      if (zonas.length >= CONFIG.predMaxZonas) break;
+      if (!zonas.includes(z)) zonas.push(z);
+    }
     if (!zonas.length) { lyrPred.clearLayers(); setSource('pred', 'ok'); return; }
 
     /* Viento dominante en todas las zonas en una sola petición */
@@ -1112,7 +1131,7 @@ const RE_FORESTAL = /forestal|infoca|cedefo|brif|ret[eé]n|incendio|infoma/i;
 const OSM_LAYERS = [
   {
     layer: lyrBomberos, pane: 'pane_bomberos', minZoom: 8,
-    build: bb => `[out:json][timeout:25];nwr["amenity"="fire_station"](${bb});out center 400;`,
+    build: bb => `[out:json][timeout:12];nwr["amenity"="fire_station"](${bb});out center 400;`,
     render: el => {
       const name = (el.tags && el.tags.name) || 'Parque de bomberos';
       const forest = RE_FORESTAL.test(name) || RE_FORESTAL.test((el.tags && el.tags.operator) || '');
@@ -1122,7 +1141,7 @@ const OSM_LAYERS = [
   },
   {
     layer: lyrAgua, pane: 'pane_agua', minZoom: 9,
-    build: (bb, z) => `[out:json][timeout:25];(
+    build: (bb, z) => `[out:json][timeout:12];(
       nwr["emergency"~"^(fire_water_pond|water_tank|suction_point)$"](${bb});
       ${z >= 14 ? `node["emergency"="fire_hydrant"](${bb});` : ''}
     );out center 500;`,
@@ -1135,12 +1154,12 @@ const OSM_LAYERS = [
   },
   {
     layer: lyrHelis, pane: 'pane_helis', minZoom: 8,
-    build: bb => `[out:json][timeout:25];nwr["aeroway"="helipad"](${bb});out center 300;`,
+    build: bb => `[out:json][timeout:12];nwr["aeroway"="helipad"](${bb});out center 300;`,
     render: el => ({ icon: '🚁', size: 18, pop: `<b>Helipuerto</b>${el.tags && el.tags.name ? '<br>' + esc(el.tags.name) : ''}` }),
   },
   {
     layer: lyrNucleos, pane: 'pane_nucleos', minZoom: 10,
-    build: bb => `[out:json][timeout:25];node["place"~"^(town|village|hamlet)$"](${bb});out 600;`,
+    build: bb => `[out:json][timeout:12];node["place"~"^(town|village|hamlet)$"](${bb});out 600;`,
     render: el => {
       const t = el.tags || {};
       return { icon: '🏘', size: 16, pop: `<b>${esc(t.name || 'Núcleo de población')}</b><br>${t.place === 'town' ? 'Villa/ciudad' : t.place === 'village' ? 'Pueblo' : 'Aldea'}${t.population ? ' · ' + esc(t.population) + ' hab.' : ''}` };
@@ -1156,9 +1175,10 @@ async function refreshOSMLayers() {
   const active = OSM_LAYERS.filter(d => map.hasLayer(d.layer));
   if (!active.length) return;
   setSource('osm', 'load');
-  let okAny = false, gated = false;
-  for (const def of active) {
-    if (z < def.minZoom) { gated = true; def.layer.clearLayers(); continue; }
+  let gated = false;
+  /* todas las capas activas se consultan EN PARALELO (antes era secuencial y se acumulaban esperas) */
+  const results = await Promise.all(active.map(async def => {
+    if (z < def.minZoom) { gated = true; def.layer.clearLayers(); return false; }
     try {
       const els = await overpass(def.build(bb, z));
       def.layer.clearLayers();
@@ -1170,18 +1190,35 @@ async function refreshOSMLayers() {
         L.marker([lat, lon], { pane: def.pane, icon: L.divIcon({ className: '', html: `<div style="font-size:${r.size}px;line-height:${r.size}px">${r.icon}</div>`, iconSize: [r.size, r.size], iconAnchor: [r.size / 2, r.size / 2] }) })
           .bindPopup(r.pop + '<br><span style="color:#647085;font-size:11px">Fuente: OpenStreetMap · acerca el zoom para más detalle</span>').addTo(def.layer);
       }
-      okAny = true;
-    } catch (e) { /* estado abajo */ }
-  }
-  setSource('osm', okAny || gated ? 'ok' : 'err');
+      return true;
+    } catch (e) { return false; }
+  }));
+  setSource('osm', results.some(Boolean) || gated ? 'ok' : 'err');
 }
 /* Recarga diferida de capas dinámicas (OSM y rejilla meteo) al mover el mapa o activarlas */
-let meteoTimer = null;
+let meteoTimer = null, predTimer = null;
 function scheduleDynamic() {
   clearTimeout(osmTimer); osmTimer = setTimeout(refreshOSMLayers, 700);
   clearTimeout(meteoTimer); meteoTimer = setTimeout(refreshMeteoLayers, 700);
+  clearTimeout(predTimer); predTimer = setTimeout(buildPrediction, 1400);
 }
 map.on('moveend', scheduleDynamic);
+
+/* Con la capa de límites municipales activa, un clic en el mapa identifica el municipio */
+map.on('click', async e => {
+  if (!map.hasLayer(wmsMunicipios)) return;
+  try {
+    const j = JSON.parse(await fetchText(
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=10&lat=${e.latlng.lat.toFixed(5)}&lon=${e.latlng.lng.toFixed(5)}`,
+      { mode: 'auto' }));
+    const a = j.address || {};
+    const muni = a.city || a.town || a.village || a.municipality || j.name || 'Sin identificar';
+    L.popup().setLatLng(e.latlng).setContent(
+      `<b>🗺 ${esc(muni)}</b><br>${esc(a.county || a.province || '')}${a.state ? ' · ' + esc(a.state) : ''}` +
+      `<br><span style="color:#647085;font-size:11px">Identificación por coordenada (OSM/Nominatim) — capa Límites activa</span>`
+    ).openOn(map);
+  } catch (err) { /* silencioso: es información auxiliar */ }
+});
 
 /* ================= VIENTO Y TEMPERATURA SOBRE EL MAPA (rejilla Open-Meteo) ================= */
 async function refreshMeteoLayers() {
