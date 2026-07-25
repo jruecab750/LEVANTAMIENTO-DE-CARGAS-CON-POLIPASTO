@@ -29,6 +29,16 @@ Protección Civil** (módulo de Intervención Operativa), centrada en la emergen
 - **Pestaña 🌬 Windy**: visor Windy.com embebido con animación (viento, rachas, temperatura,
   humedad).
 
+## Exportación a SIG (⬇ GeoJSON)
+
+El botón **⬇ GeoJSON** de la cabecera descarga una instantánea con capas etiquetadas:
+`foco_firms` (puntos con FRP, confianza, satélite y hora), `zona_focos` (polígonos con
+recuento y fechas), `prediccion_avance` (sector con todos los factores del cálculo) y
+`municipio_afectado`. Ábrela en [GeoLibre](https://web.geolibre.app/) (SIG open source en
+el navegador, sin instalar nada), QGIS o cualquier SIG para: buffers de afectación,
+isócronas desde parques de bomberos, animación temporal de detecciones o mapas de
+situación en PDF para el briefing. Flujo: *el monitor vigila → el SIG analiza*.
+
 ## Fuentes cargadas
 
 | Fuente | Qué aporta | Vía |

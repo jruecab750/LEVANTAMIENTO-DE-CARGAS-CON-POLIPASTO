@@ -40,8 +40,8 @@
   #prox-chip{cursor:pointer;}
   #prox-chip.alerta{background:var(--critical-bg); color:var(--critical); border-color:var(--critical); animation:pulse 1.2s infinite;}
   #clock{margin-left:auto; font-variant-numeric:tabular-nums; color:var(--ink2); font-size:12px;}
-  #btn-refresh{background:var(--panel2); color:var(--ink); border:1px solid var(--border); border-radius:6px; padding:4px 12px; cursor:pointer; font-size:12px;}
-  #btn-refresh:hover{border-color:var(--accent);}
+  #btn-refresh,#btn-geojson{background:var(--panel2); color:var(--ink); border:1px solid var(--border); border-radius:6px; padding:4px 12px; cursor:pointer; font-size:12px;}
+  #btn-refresh:hover,#btn-geojson:hover{border-color:var(--accent);}
 
   main{flex:1; display:grid; grid-template-columns:minmax(0,1fr) 420px; min-height:0;}
   @media (max-width:900px){ main{grid-template-columns:1fr; grid-template-rows:45vh 1fr;} body{overflow:auto;} }
@@ -156,6 +156,7 @@
   <span class="badge-info">🔥 <span id="firms-count">–</span> focos 24 h</span>
   <span class="badge-info" id="prox-chip" title="Activa la vigilancia de proximidad a focos">📍 Vigilar mi posición</span>
   <span id="clock">--:--:--</span>
+  <button id="btn-geojson" title="Descarga focos, zonas, predicción y municipios afectados como GeoJSON para analizarlos en un SIG (GeoLibre, QGIS…)">⬇ GeoJSON</button>
   <button id="btn-refresh">↻ Actualizar todo</button>
 </header>
 
@@ -788,6 +789,7 @@ function parseCSV(text) {
 }
 const CONF_COLOR = { h: '#ef4444', high: '#ef4444', n: '#fb923c', nominal: '#fb923c', l: '#fbbf24', low: '#fbbf24' };
 let firmsPoints = [];   // [{lat,lon,frp,when}] para el aviso de proximidad
+let lastZonasExport = []; // instantánea de zonas/predicciones para exportar a GeoJSON
 
 async function loadFIRMS() {
   if (!CONFIG.firmsKey) { setSource('firms', 'err'); return; }
@@ -1024,6 +1026,7 @@ async function buildPrediction() {
     }
 
     lyrPred.clearLayers();
+    const exportables = [];
     for (const z of zonas) {
       const c = z.focos;
       const frpSum = c.reduce((s, f) => s + f.frp, 0);
@@ -1070,6 +1073,7 @@ async function buildPrediction() {
 
       if (avance == null || !z.wind) {
         zonaPoly.bindPopup(`<b>🔥 Zona de focos</b> · ${c.length} focos · FRP total ${frpSum.toFixed(0)} MW<br>Primera detección: ${tMin.toLocaleString('es-ES')}<br>Última: ${tMax.toLocaleString('es-ES')}<br>⚠ Sin dato de viento: no se proyecta avance.`).addTo(lyrPred);
+        exportables.push({ zona: zonaPts, n: c.length, frp: +frpSum.toFixed(1), tmin: tMin.toISOString(), tmax: tMax.toISOString(), pred: null });
         continue;
       }
 
@@ -1109,10 +1113,50 @@ async function buildPrediction() {
       L.marker(punta, { pane: 'pane_pred', icon: L.divIcon({ className: '', iconSize: [46, 16], iconAnchor: [23, 8],
         html: `<div style="color:#fbbf24;font-weight:700;font-size:11px;text-shadow:0 0 4px #000;text-align:center">+${CONFIG.predHoras} h</div>` }) })
         .bindPopup(popup).addTo(lyrPred);
+      exportables.push({
+        zona: zonaPts, n: c.length, frp: +frpSum.toFixed(1), tmin: tMin.toISOString(), tmax: tMax.toISOString(),
+        pred, avance: Math.round(avance), ros: +ros.toFixed(2), headKm: +headKm.toFixed(2),
+        windSpd: Math.round(z.wind.spd), windFrom: Math.round(z.wind.from), fVeg, fPend: +fPend.toFixed(2),
+      });
     }
+    lastZonasExport = exportables;
     setSource('pred', 'ok');
   } catch (e) { setSource('pred', 'err'); }
 }
+
+/* ================= EXPORTACIÓN GEOJSON (para GeoLibre, QGIS…) ================= */
+function exportGeoJSON() {
+  const ll = p => [+(+p[1]).toFixed(5), +(+p[0]).toFixed(5)]; // [lat,lon] → [lon,lat]
+  const anillo = pts => { const r = pts.map(ll); r.push(r[0]); return r; };
+  const feats = [];
+  for (const f of firmsPoints) {
+    feats.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [+f.lon.toFixed(5), +f.lat.toFixed(5)] },
+      properties: { capa: 'foco_firms', frp_mw: +f.frp.toFixed(1), confianza: f.conf, satelite: f.sat, instrumento: f.instr, deteccion_utc: f.when.toISOString() } });
+  }
+  for (const z of lastZonasExport) {
+    feats.push({ type: 'Feature', geometry: { type: 'Polygon', coordinates: [anillo(z.zona)] },
+      properties: { capa: 'zona_focos', focos: z.n, frp_total_mw: z.frp, primera_deteccion_utc: z.tmin, ultima_deteccion_utc: z.tmax } });
+    if (z.pred) {
+      feats.push({ type: 'Feature', geometry: { type: 'Polygon', coordinates: [anillo(z.pred)] },
+        properties: { capa: 'prediccion_avance', horizonte_h: CONFIG.predHoras, avance_deg: z.avance, ros_kmh: z.ros, avance_km: z.headKm,
+          viento_kmh: z.windSpd, viento_desde_deg: z.windFrom, factor_vegetacion: z.fVeg, factor_pendiente: z.fPend,
+          aviso: 'Estimación docente simplificada; no es un modelo de propagación validado' } });
+    }
+  }
+  for (const [nombre, st] of muniState) {
+    if (!st.pos) continue;
+    feats.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [+st.pos.lon.toFixed(5), +st.pos.lat.toFixed(5)] },
+      properties: { capa: 'municipio_afectado', nombre, origen: st.source === 'manual' ? 'declarado_operador' : 'detectado_noticias' } });
+  }
+  const gj = { type: 'FeatureCollection', name: 'monitor_emergencias', features: feats };
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(gj, null, 1)], { type: 'application/geo+json' }));
+  a.download = 'monitor-emergencias_' + new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-') + '.geojson';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  alert(`GeoJSON descargado: ${feats.length} elementos (focos, zonas, predicción y municipios).\n\nÁbrelo en GeoLibre (web.geolibre.app), QGIS o cualquier SIG para análisis: buffers, isócronas, mapas de situación en PDF…`);
+}
+document.getElementById('btn-geojson').addEventListener('click', exportGeoJSON);
 
 /* ================= OSM / OVERPASS (bomberos, agua, helipuertos, núcleos) ================= */
 const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
@@ -1491,6 +1535,7 @@ function renderX() {
     <div class="xacc"><a href="https://forest-fire.emergency.copernicus.eu/apps/effis_current_situation/" target="_blank" rel="noopener">EFFIS Current Situation</a><span>Copernicus</span></div>
     <div class="xacc"><a href="https://firms.modaps.eosdis.nasa.gov/map/" target="_blank" rel="noopener">NASA FIRMS</a><span>Focos térmicos por satélite</span></div>
     <div class="xacc"><a href="https://xn--incendiosespaa-2nb.es/" target="_blank" rel="noopener">IncendiosEspaña.es</a><span>Agregador independiente de referencia</span></div>
+    <div class="xacc"><a href="https://web.geolibre.app/" target="_blank" rel="noopener">GeoLibre</a><span>SIG en el navegador — abre aquí el ⬇ GeoJSON exportado para análisis</span></div>
     <div class="xacc"><a href="https://www.aemet.es/es/eltiempo/prediccion/avisos" target="_blank" rel="noopener">Avisos AEMET</a><span>Meteorología</span></div>
     <div class="xacc"><a href="https://emergency.copernicus.eu/" target="_blank" rel="noopener">Copernicus EMS</a><span>Activaciones de emergencia</span></div>
     <div class="xacc"><a href="https://www.ign.es/web/ign/portal/sis-catalogo-terremotos" target="_blank" rel="noopener">Sismicidad IGN</a><span>Instituto Geográfico Nacional</span></div>
