@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Información de emergencia · Incendio forestal</title>
+<!--
+  WEB CIUDADANA DE ACTIVACIÓN INMEDIATA — PROTOTIPO FORMATIVO
+  Ciclo de Emergencias y Protección Civil · ver ANALISIS.md
+
+  Para ACTIVAR: editar solo el bloque PAYLOAD de aquí abajo y publicar.
+  Todo campo vacío se oculta automáticamente.
+-->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root{
+    --rojo:#c62828; --rojo-osc:#8e0000; --naranja:#e65100; --amarillo:#b26a00; --verde:#1b5e20;
+    --tinta:#1a1a1a; --tinta2:#555; --fondo:#ffffff; --gris:#f2f2f2; --borde:#ddd;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html{font-size:17px;}
+  body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; color:var(--tinta); background:var(--fondo); line-height:1.5; padding-bottom:84px;}
+  .simulacro{background:repeating-linear-gradient(45deg,#ffd600,#ffd600 14px,#1a1a1a 14px,#1a1a1a 28px); color:#fff; text-align:center; font-weight:800; padding:2px;}
+  .simulacro span{display:block; background:#1a1a1a; padding:6px 10px; font-size:.85rem; letter-spacing:.5px;}
+
+  header.principal{background:var(--rojo); color:#fff; padding:16px 14px;}
+  header.principal .org{font-size:.8rem; text-transform:uppercase; letter-spacing:1px; opacity:.9;}
+  header.principal h1{font-size:1.45rem; line-height:1.25; margin-top:4px;}
+  .boletin{background:var(--rojo-osc); color:#fff; padding:8px 14px; font-size:.9rem; display:flex; justify-content:space-between; flex-wrap:wrap; gap:6px;}
+
+  main{max-width:760px; margin:0 auto; padding:14px;}
+  section{margin-bottom:26px;}
+  h2{font-size:1.25rem; margin-bottom:10px; border-left:6px solid var(--rojo); padding-left:10px;}
+  .tarjeta{background:var(--gris); border:1px solid var(--borde); border-radius:12px; padding:14px; margin-bottom:12px;}
+
+  /* Selector ¿dónde estás? */
+  .munis{display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:10px;}
+  .muni-btn{display:block; width:100%; border:0; border-radius:12px; padding:14px 10px; font-size:1.05rem; font-weight:800; color:#fff; cursor:pointer; text-align:center; min-height:56px;}
+  .s-evacuacion{background:var(--rojo);}
+  .s-confinamiento{background:var(--naranja);}
+  .s-alerta{background:var(--amarillo);}
+  .s-normalidad{background:var(--verde);}
+  .muni-btn small{display:block; font-weight:600; font-size:.75rem; opacity:.95; text-transform:uppercase; letter-spacing:.5px; margin-top:3px;}
+  .muni-btn.sel{outline:4px solid var(--tinta);}
+
+  /* Panel de instrucciones del municipio elegido */
+  #detalle{border-radius:12px; padding:16px; color:#fff; display:none;}
+  #detalle h3{font-size:1.35rem; margin-bottom:6px;}
+  #detalle .orden{font-size:1.1rem; font-weight:800; text-transform:uppercase; letter-spacing:.5px;}
+  #detalle ul{margin:10px 0 0 22px;}
+  #detalle li{margin-bottom:8px; font-size:1.02rem;}
+  #detalle .pe{background:rgba(255,255,255,.18); border-radius:8px; padding:10px; margin-top:12px;}
+
+  .lista-simple{list-style:none;}
+  .lista-simple li{padding:10px 0; border-bottom:1px solid var(--borde);}
+  .lista-simple b{display:block;}
+  .etq{display:inline-block; font-size:.75rem; font-weight:800; border-radius:6px; padding:2px 8px; color:#fff; vertical-align:2px; margin-left:6px;}
+
+  #map{height:340px; border-radius:12px; border:1px solid var(--borde);}
+
+  .tel-grid{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+  .tel{display:block; text-align:center; background:var(--gris); border:2px solid var(--borde); border-radius:12px; padding:12px; text-decoration:none; color:var(--tinta);}
+  .tel b{display:block; font-size:1.3rem;}
+  .tel span{font-size:.85rem; color:var(--tinta2);}
+
+  .fuentes a{display:inline-block; background:var(--gris); border:1px solid var(--borde); border-radius:20px; padding:6px 14px; margin:4px 6px 4px 0; text-decoration:none; color:var(--tinta); font-weight:600;}
+  .aviso-bulos{background:#fff8e1; border:2px solid var(--amarillo); border-radius:12px; padding:14px;}
+
+  footer{color:var(--tinta2); font-size:.8rem; text-align:center; padding:20px 14px 30px;}
+
+  /* Botón 112 fijo */
+  .btn-112{position:fixed; bottom:0; left:0; right:0; background:var(--rojo); color:#fff; text-align:center; padding:16px; font-size:1.3rem; font-weight:900; text-decoration:none; box-shadow:0 -3px 12px rgba(0,0,0,.3); z-index:2000;}
+  .btn-112 small{display:block; font-size:.75rem; font-weight:600; opacity:.9;}
+
+  /* Estados preparada / desactivada */
+  .estado-banda{padding:14px; border-radius:12px; font-size:1.05rem; margin-bottom:18px;}
+  .e-preparada{background:#e8f5e9; border:2px solid var(--verde);}
+  .e-desactivada{background:#e3f2fd; border:2px solid #1565c0;}
+  @media (max-width:480px){ html{font-size:16px;} .tel-grid{grid-template-columns:1fr;} }
+</style>
+</head>
+<body>
+
+<div class="simulacro"><span>⚠ PROTOTIPO FORMATIVO · SIMULACRO — Esto NO es un canal oficial de emergencias. En una emergencia real llama al 112</span></div>
+
+<header class="principal">
+  <div class="org" id="h-org"></div>
+  <h1 id="h-titulo"></h1>
+</header>
+<div class="boletin" id="h-boletin" hidden></div>
+
+<main id="contenido"></main>
+
+<a class="btn-112" href="tel:112">📞 112 <small>solo emergencias — no llamar para pedir información</small></a>
+
+<footer>
+  Prototipo docente de web de activación inmediata · Ciclo de Emergencias y Protección Civil.<br>
+  El contenido se rellena desde el bloque PAYLOAD (ver <a href="ANALISIS.md">análisis</a>).
+</footer>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+'use strict';
+/* ═════════════════ PAYLOAD DE ACTIVACIÓN (editar SOLO esto) ═════════════════
+   estado: 'preparada' | 'activada' | 'desactivada'
+   situacion de cada municipio: 'evacuacion' | 'confinamiento' | 'alerta' | 'normalidad' */
+const PAYLOAD = {
+  estado: 'activada',
+
+  organismo: 'Protección Civil · Junta de Andalucía (SIMULADO)',
+  emergencia: {
+    nombre: 'Incendio forestal — IF Sierra de Grazalema (Cádiz)',
+    declarado: '25/07/2026 · 13:40',
+    situacion: 'Situación Operativa 1 del Plan de Emergencia por Incendios Forestales de Andalucía',
+  },
+  boletin: { numero: 3, hora: '25/07/2026 · 18:30', proximo: 'antes de las 20:30' },
+
+  municipios: [
+    {
+      n: 'Grazalema', situacion: 'evacuacion',
+      instruccion: 'Evacuación ordenada del casco urbano por la A-372 dirección El Bosque.',
+      encuentro: 'Punto de encuentro: Polideportivo de El Bosque (autobuses cada 20 min desde la plaza de España).',
+      lat: 36.758, lon: -5.366,
+    },
+    {
+      n: 'Benamahoma', situacion: 'evacuacion',
+      instruccion: 'Evacuación inmediata. NO usar la CA-9104 hacia Grazalema: dirección El Bosque.',
+      encuentro: 'Punto de encuentro: Plaza del Ayuntamiento de El Bosque.',
+      lat: 36.762, lon: -5.418,
+    },
+    {
+      n: 'El Bosque', situacion: 'confinamiento',
+      instruccion: 'Permanece dentro de casa con puertas y ventanas cerradas. El humo puede ser denso a intervalos.',
+      encuentro: '',
+      lat: 36.757, lon: -5.507,
+    },
+    {
+      n: 'Zahara de la Sierra', situacion: 'alerta',
+      instruccion: 'Prepara la evacuación por si se ordena: documentación, medicinas, móvil y cargador a mano.',
+      encuentro: '',
+      lat: 36.840, lon: -5.390,
+    },
+    {
+      n: 'Ubrique', situacion: 'normalidad',
+      instruccion: 'Sin afectación prevista. Evita desplazamientos hacia la zona del incendio.',
+      encuentro: '',
+      lat: 36.677, lon: -5.446,
+    },
+  ],
+
+  cortes: [
+    { via: 'A-372', tramo: 'Grazalema ↔ Zahara (puerto de las Palomas)', alternativa: 'A-372 oeste hacia El Bosque' },
+    { via: 'CA-9104', tramo: 'Benamahoma ↔ Grazalema', alternativa: 'Cerrada. Salida solo dirección El Bosque' },
+  ],
+
+  albergues: [
+    { n: 'Polideportivo Municipal de El Bosque', dir: 'Av. Diputación s/n, El Bosque', animales: true, lat: 36.7585, lon: -5.5095 },
+    { n: 'IES Sierra de Cádiz', dir: 'Ubrique', animales: false, lat: 36.6803, lon: -5.4442 },
+  ],
+
+  telefonos: [
+    { num: '955 54 50 60', txt: 'Información al ciudadano (SIMULADO)' },
+    { num: '900 71 40 40', txt: 'Personas no localizadas (SIMULADO)' },
+  ],
+
+  fuentes: [
+    ['@E112Andalucia', 'https://x.com/E112Andalucia'],
+    ['@Plan_INFOCA', 'https://x.com/Plan_INFOCA'],
+    ['@AndaluciaJunta', 'https://x.com/AndaluciaJunta'],
+    ['AEMET avisos', 'https://www.aemet.es/es/eltiempo/prediccion/avisos'],
+  ],
+
+  mapa: {
+    centro: [36.77, -5.42], zoom: 12,
+    /* polígono aproximado de la zona afectada (opcional, lista de [lat, lon]) */
+    zona: [[36.79, -5.42], [36.80, -5.36], [36.76, -5.33], [36.73, -5.37], [36.74, -5.43]],
+  },
+};
+/* ═════════════════ FIN DEL PAYLOAD ═════════════════ */
+
+const SIT = {
+  evacuacion:    { cls: 's-evacuacion',    color: '#c62828', icono: '🏃', label: 'EVACUACIÓN' },
+  confinamiento: { cls: 's-confinamiento', color: '#e65100', icono: '🏠', label: 'CONFINAMIENTO' },
+  alerta:        { cls: 's-alerta',        color: '#b26a00', icono: '⚠️', label: 'ALERTA' },
+  normalidad:    { cls: 's-normalidad',    color: '#1b5e20', icono: '✅', label: 'NORMALIDAD' },
+};
+const CONSEJOS = {
+  evacuacion: [
+    'Sal ya. No esperes a ver el fuego o el humo cerca.',
+    'Lleva solo: documentación, medicinas, teléfono, cargador y agua.',
+    'Cierra la llave del gas y deja cerradas puertas y ventanas (sin llave la principal).',
+    'Sigue la ruta indicada. No tomes atajos por pistas o caminos forestales.',
+    'Si no tienes vehículo, ve al punto de encuentro: habrá transporte.',
+    'Avisa a vecinos mayores o con movilidad reducida.',
+  ],
+  confinamiento: [
+    'Quédate dentro de casa. Dentro se resiste; huyendo entre humo, no.',
+    'Cierra puertas, ventanas y persianas. Tapa rendijas con trapos húmedos.',
+    'Apaga el aire acondicionado y la ventilación.',
+    'Llena bañera y recipientes con agua.',
+    'Ropa de algodón de manga larga. Nada de tejidos sintéticos.',
+    'Escucha la radio o revisa esta página: te diremos cuándo salir.',
+  ],
+  alerta: [
+    'Prepara una bolsa de emergencia: documentación, medicinas, móvil, cargador, agua.',
+    'Aparca el coche mirando hacia la salida y con el depósito con combustible.',
+    'Acuerda con tu familia un punto de reunión por si os separáis.',
+    'No riegues el tejado ni intentes defender la casa: espera instrucciones.',
+    'Revisa esta página en cada boletín.',
+  ],
+  normalidad: [
+    'No te acerques a la zona del incendio, ni para mirar ni para grabar.',
+    'Deja libres las carreteras de acceso: las necesitan los equipos de extinción.',
+    'No vueles drones: obligan a parar los medios aéreos.',
+    'Comparte solo información de fuentes oficiales.',
+  ],
+};
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+function render() {
+  $('#h-org').textContent = PAYLOAD.organismo;
+  const M = $('#contenido');
+
+  if (PAYLOAD.estado === 'preparada') {
+    $('#h-titulo').textContent = 'Información de emergencias por incendio forestal';
+    M.innerHTML = `
+      <div class="estado-banda e-preparada"><b>✅ Sin emergencias activas.</b><br>
+      Esta página se activará si se declara un incendio forestal con riesgo para la población,
+      con instrucciones concretas para tu municipio. Guárdala en favoritos.</div>
+      <section><h2>Prepárate hoy (10 minutos)</h2><div class="tarjeta"><ul style="margin-left:20px">
+        <li>Ten localizada la documentación y las medicinas de toda la familia.</li>
+        <li>Acuerda un punto de reunión familiar fuera del pueblo.</li>
+        <li>Guarda el 112 y esta página en el móvil.</li>
+        <li>Si vives en zona de campo: mantén limpio de vegetación el perímetro de tu parcela.</li>
+      </ul></div></section>`;
+    return;
+  }
+
+  if (PAYLOAD.estado === 'desactivada') {
+    $('#h-titulo').textContent = 'Emergencia finalizada — ' + PAYLOAD.emergencia.nombre;
+    M.innerHTML = `
+      <div class="estado-banda e-desactivada"><b>ℹ La emergencia ha finalizado.</b><br>
+      El regreso a las viviendas se hará según indique cada ayuntamiento. Precaución con
+      árboles y postes debilitados, cenizas calientes y cortes de suministro.</div>`;
+    return;
+  }
+
+  /* ══════ estado ACTIVADA ══════ */
+  $('#h-titulo').textContent = PAYLOAD.emergencia.nombre;
+  const B = $('#h-boletin');
+  B.hidden = false;
+  B.innerHTML = `<span><b>Boletín nº ${PAYLOAD.boletin.numero}</b> · ${esc(PAYLOAD.boletin.hora)}</span>
+    <span>Próxima actualización: ${esc(PAYLOAD.boletin.proximo)}</span>`;
+
+  M.innerHTML = `
+    <section>
+      <h2>1 · ¿Dónde estás?</h2>
+      <p style="margin-bottom:10px">Toca tu municipio para ver <b>qué debes hacer ahora</b>:</p>
+      <div class="munis" id="munis" role="group" aria-label="Selecciona tu municipio"></div>
+      <div id="detalle" role="region" aria-live="polite"></div>
+    </section>
+    <section>
+      <h2>2 · Mapa de la zona</h2>
+      <div id="map" aria-label="Mapa de la zona afectada"></div>
+    </section>
+    <section id="sec-cortes"><h2>3 · Carreteras cortadas</h2><ul class="lista-simple" id="cortes"></ul></section>
+    <section id="sec-albergues"><h2>4 · Albergues</h2><ul class="lista-simple" id="albergues"></ul></section>
+    <section>
+      <h2>5 · Teléfonos</h2>
+      <div class="tel-grid" id="tels"></div>
+    </section>
+    <section>
+      <h2>6 · Información oficial — no alimentes el bulo</h2>
+      <div class="aviso-bulos">Comparte <b>solo</b> lo publicado por las fuentes oficiales.
+      Los rumores en cadenas de mensajes provocan evacuaciones erróneas y colapsan carreteras.
+      <div class="fuentes" style="margin-top:8px" id="fuentes"></div></div>
+    </section>
+    <section><h2>Situación oficial</h2><div class="tarjeta">
+      ${esc(PAYLOAD.emergencia.situacion)}<br>
+      <span style="color:var(--tinta2)">Declarado: ${esc(PAYLOAD.emergencia.declarado)}</span>
+    </div></section>`;
+
+  /* municipios */
+  const cont = $('#munis');
+  PAYLOAD.municipios.forEach((m, i) => {
+    const s = SIT[m.situacion] || SIT.alerta;
+    const b = document.createElement('button');
+    b.className = 'muni-btn ' + s.cls;
+    b.innerHTML = `${s.icono} ${esc(m.n)}<small>${s.label}</small>`;
+    b.addEventListener('click', () => mostrarMunicipio(i, b));
+    cont.appendChild(b);
+  });
+
+  /* cortes */
+  $('#cortes').innerHTML = PAYLOAD.cortes.map(c =>
+    `<li><b>🚧 ${esc(c.via)} — ${esc(c.tramo)}</b>Alternativa: ${esc(c.alternativa)}</li>`).join('')
+    || '<li>Sin cortes comunicados.</li>';
+  if (!PAYLOAD.cortes.length) $('#sec-cortes').hidden = true;
+
+  /* albergues */
+  $('#albergues').innerHTML = PAYLOAD.albergues.map(a =>
+    `<li><b>🏫 ${esc(a.n)}</b>${esc(a.dir)} <span class="etq" style="background:${a.animales ? 'var(--verde)' : 'var(--tinta2)'}">${a.animales ? 'ADMITE ANIMALES' : 'SIN ANIMALES'}</span></li>`).join('');
+  if (!PAYLOAD.albergues.length) $('#sec-albergues').hidden = true;
+
+  /* teléfonos */
+  $('#tels').innerHTML = PAYLOAD.telefonos.map(t =>
+    `<a class="tel" href="tel:${t.num.replace(/\s/g, '')}"><b>${esc(t.num)}</b><span>${esc(t.txt)}</span></a>`).join('');
+
+  /* fuentes */
+  $('#fuentes').innerHTML = PAYLOAD.fuentes.map(([n, u]) =>
+    `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(n)}</a>`).join('');
+
+  /* mapa (en diferido: el texto es lo prioritario) */
+  setTimeout(initMapa, 100);
+}
+
+function mostrarMunicipio(i, btn) {
+  document.querySelectorAll('.muni-btn').forEach(x => x.classList.remove('sel'));
+  btn.classList.add('sel');
+  const m = PAYLOAD.municipios[i];
+  const s = SIT[m.situacion] || SIT.alerta;
+  const d = $('#detalle');
+  d.style.display = 'block';
+  d.style.background = s.color;
+  d.style.marginTop = '14px';
+  d.innerHTML = `
+    <h3>${s.icono} ${esc(m.n)}</h3>
+    <div class="orden">${s.label}</div>
+    <p style="margin-top:8px;font-size:1.05rem"><b>${esc(m.instruccion)}</b></p>
+    ${m.encuentro ? `<div class="pe">📍 ${esc(m.encuentro)}</div>` : ''}
+    <ul>${(CONSEJOS[m.situacion] || []).map(c => `<li>${esc(c)}</li>`).join('')}</ul>`;
+  d.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  if (window._mapa && m.lat) window._mapa.setView([m.lat, m.lon], 13);
+}
+
+function initMapa() {
+  if (!window.L || window._mapa) return;
+  const mp = L.map('map', { scrollWheelZoom: false }).setView(PAYLOAD.mapa.centro, PAYLOAD.mapa.zoom);
+  window._mapa = mp;
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18, attribution: '© OpenStreetMap' }).addTo(mp);
+  if (PAYLOAD.mapa.zona && PAYLOAD.mapa.zona.length >= 3)
+    L.polygon(PAYLOAD.mapa.zona, { color: '#c62828', weight: 3, fillOpacity: 0.18 })
+      .bindPopup('<b>Zona afectada aproximada</b><br>No entrar bajo ningún concepto.').addTo(mp);
+  for (const m of PAYLOAD.municipios) {
+    if (m.lat == null) continue;
+    const s = SIT[m.situacion] || SIT.alerta;
+    L.circleMarker([m.lat, m.lon], { radius: 11, color: s.color, fillColor: s.color, fillOpacity: 0.85, weight: 2 })
+      .bindPopup(`<b>${esc(m.n)}</b><br>${s.icono} ${s.label}<br>${esc(m.instruccion)}`).addTo(mp);
+  }
+  for (const a of PAYLOAD.albergues) {
+    if (a.lat == null) continue;
+    L.marker([a.lat, a.lon], { icon: L.divIcon({ className: '', html: '<div style="font-size:24px">🏫</div>', iconSize: [24, 24], iconAnchor: [12, 12] }) })
+      .bindPopup(`<b>Albergue: ${esc(a.n)}</b><br>${esc(a.dir)}<br>${a.animales ? '✅ admite animales' : '🚫 sin animales'}`).addTo(mp);
+  }
+}
+
+render();
+</script>
+</body>
+</html>

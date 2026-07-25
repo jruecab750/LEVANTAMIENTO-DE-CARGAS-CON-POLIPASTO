@@ -1484,7 +1484,9 @@ function renderX() {
   h += '<div class="xgroup">Búsquedas en vivo</div>';
   h += X_SEARCHES.map(([label, qq]) =>
     `<div class="xacc"><a href="https://x.com/search?q=${qq}&f=live" target="_blank" rel="noopener">🔎 ${esc(label)}</a></div>`).join('');
-  h += `<div class="xgroup">Visores oficiales</div>
+  h += `<div class="xgroup">Comunicación a la ciudadanía</div>
+    <div class="xacc"><a href="activacion/" target="_blank" rel="noopener">🚨 Web ciudadana de activación inmediata</a><span>Prototipo formativo (semáforo municipal, instrucciones, albergues)</span></div>
+    <div class="xgroup">Visores oficiales</div>
     <div class="xacc"><a href="https://www.juntadeandalucia.es/medioambiente/portal/web/plan-infoca" target="_blank" rel="noopener">Plan INFOCA</a><span>Junta de Andalucía</span></div>
     <div class="xacc"><a href="https://forest-fire.emergency.copernicus.eu/apps/effis_current_situation/" target="_blank" rel="noopener">EFFIS Current Situation</a><span>Copernicus</span></div>
     <div class="xacc"><a href="https://firms.modaps.eosdis.nasa.gov/map/" target="_blank" rel="noopener">NASA FIRMS</a><span>Focos térmicos por satélite</span></div>
