@@ -45,6 +45,7 @@ situación en PDF para el briefing. Flujo: *el monitor vigila → el SIG analiza
 |---|---|---|
 | **NASA FIRMS** (como IncendiosEspaña.es) | Focos térmicos VIIRS de las últimas 24 h como **puntos clicables**: tamaño = FRP (potencia radiativa), color = confianza, opacidad = antigüedad. Refresco cada 5 min | API de área (clave gratuita en `CONFIG.firmsKey`) |
 | **NASA EONET** (como worldmonitor) | Incendios declarados abiertos | API directa |
+| **Fogos.pt / ANEPC** (como incendib.es) | Incendios **oficiales de Portugal** con estado (en curso/resolución/conclusión/vigilancia) y medios desplegados (efectivos, vehículos, aéreos) — clave en incendios transfronterizos | API pública de VOST Portugal (atribución obligatoria; para uso intensivo, registro en fogos.pt/pt/api) |
 | **EFFIS / Copernicus** (WMS) | Riesgo de incendio hoy (FWI), focos raster, **perímetros de área quemada de la temporada** | Teselas WMS |
 | **NASA GIBS** | Anomalías térmicas VIIRS del día anterior | Teselas WMTS |
 | **IGN** | Mapas base, ortofoto PNOA, **límites municipales** (WMS INSPIRE), sismicidad (RSS) | Teselas + WMS + RSS |

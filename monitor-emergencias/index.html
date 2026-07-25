@@ -388,7 +388,7 @@ basePNOA.addTo(map);
 
 /* Cada capa superpuesta vive en su propio "pane": así puede reordenarse (z-index)
    y regularse su transparencia (opacity CSS) desde el panel 🗂 Capas. */
-const PANE_IDS = ['pred','firms','munis','eonet','wind','temp','bomberos','agua','helis','nucleos','quakes','hs','gibs','ba','limites','fwi','veg','osmref'];
+const PANE_IDS = ['pred','firms','fogospt','munis','eonet','wind','temp','bomberos','agua','helis','nucleos','quakes','hs','gibs','ba','limites','fwi','veg','osmref'];
 for (const id of PANE_IDS) map.createPane('pane_' + id);
 
 const EFFIS = 'https://maps.effis.emergency.copernicus.eu/effis';
@@ -432,6 +432,7 @@ const lyrNucleos = L.layerGroup();
 const lyrWind = L.layerGroup();
 const lyrTemp = L.layerGroup();
 const lyrPred = L.layerGroup();
+const lyrFogosPT = L.layerGroup();
 
 /* Registro de capas: orden de la lista = orden de dibujo (la primera queda encima).
    on = visible por defecto, op = transparencia por defecto. */
@@ -440,6 +441,7 @@ const OVERLAYS = [
   { id: 'pred',     label: '🔮 Zonas + predicción de avance (est.)', layer: lyrPred,      on: true,  op: 1 },
   { id: 'munis',    label: '🚩 Municipios afectados/declarados',    layer: lyrMunis,     on: true,  op: 1 },
   { id: 'eonet',    label: '📍 Incendios declarados (EONET)',       layer: lyrEONET,     on: true,  op: 1 },
+  { id: 'fogospt',  label: '🇵🇹 Incendios oficiales Portugal (Fogos.pt)', layer: lyrFogosPT, on: true, op: 1 },
   { id: 'wind',     label: '🌬 Viento animado — partículas (Open-Meteo)', layer: lyrWind, on: false, op: 1 },
   { id: 'temp',     label: '🌡 Temperaturas (Open-Meteo)',          layer: lyrTemp,      on: false, op: 1 },
   { id: 'bomberos', label: '🚒 Parques de bomberos (OSM)',          layer: lyrBomberos,  on: false, op: 1 },
@@ -1451,6 +1453,45 @@ async function loadEONET() {
   } catch (e) { setSource('eonet', 'err'); }
 }
 
+/* ================= INCENDIOS OFICIALES DE PORTUGAL (Fogos.pt / ANEPC) =================
+   Único dato OFICIAL por incendio con estado y medios desplegados en abierto de Iberia.
+   Datos de la Autoridade Nacional de Emergência e Proteção Civil vía Fogos.pt (VOST PT). */
+function fogosEstado(s) {
+  s = String(s || '').toLowerCase();
+  if (s.includes('curso')) return ['#ff3b30', 'En curso'];
+  if (s.includes('resolu')) return ['#ff9f43', 'En resolución'];
+  if (s.includes('conclus')) return ['#4ade80', 'En conclusión'];
+  if (s.includes('vigil')) return ['#58a6ff', 'Vigilancia'];
+  return ['#fbbf24', s || 'Despacho'];
+}
+async function loadFogosPT() {
+  if (!map.hasLayer(lyrFogosPT)) return;
+  setSource('fogospt', 'load');
+  try {
+    const j = JSON.parse(await fetchText('https://api.fogos.pt/new/fires', { mode: 'auto' }));
+    const fires = (j && j.data) || [];
+    lyrFogosPT.clearLayers();
+    for (const f of fires) {
+      const lat = parseFloat(f.lat), lon = parseFloat(f.lng);
+      if (isNaN(lat) || isNaN(lon)) continue;
+      const [col, estado] = fogosEstado(f.status);
+      const medios = (f.man || 0) + (f.terrain || 0) + (f.aerial || 0);
+      L.circleMarker([lat, lon], { pane: 'pane_fogospt',
+        radius: 7 + Math.min(9, medios / 25), color: '#ffffff', weight: 2,
+        fillColor: col, fillOpacity: 0.9 })
+        .bindPopup(
+          `<b>🇵🇹 ${esc(f.location || f.concelho || 'Incendio')}</b><br>` +
+          `${esc(f.concelho || '')}${f.district ? ' · ' + esc(f.district) : ''}<br>` +
+          `Estado oficial: <b style="color:${col}">${esc(estado)}</b>${f.natureza ? ' · ' + esc(f.natureza) : ''}<br>` +
+          `Medios: 👨‍🚒 ${f.man || 0} · 🚒 ${f.terrain || 0} · 🚁 ${f.aerial || 0}<br>` +
+          `Inicio: ${esc((f.date || '') + ' ' + (f.hour || ''))}<br>` +
+          `<span style="color:#647085;font-size:11px">Fuente oficial: ANEPC vía <a href="https://fogos.pt" target="_blank" rel="noopener">Fogos.pt</a> (VOST Portugal)</span>`)
+        .addTo(lyrFogosPT);
+    }
+    setSource('fogospt', 'ok');
+  } catch (e) { setSource('fogospt', 'err'); }
+}
+
 /* ================= SISMOS (IGN con respaldo USGS) ================= */
 async function loadQuakes() {
   const pane = document.getElementById('p-sismos');
@@ -1563,7 +1604,7 @@ async function refreshNews() {
   loadNews('p-pcivil', 'gn-pcivil', CONFIG.queries.pcivil);
 }
 function refreshData() {
-  loadAvisos(); loadEONET(); loadQuakes(); load303030(); refreshMeteoLayers();
+  loadAvisos(); loadEONET(); loadQuakes(); load303030(); refreshMeteoLayers(); loadFogosPT();
   for (const w of [wmsHotspots, wmsBurnt, wmsFWI]) { if (map.hasLayer(w)) w.setParams({ _t: Date.now() }); }
 }
 function refreshAll() { refreshNews(); refreshData(); loadFIRMS(); refreshOSMLayers(); }
@@ -1579,6 +1620,7 @@ regSource('meteo', 'Meteo 30-30-30');
 regSource('osm', 'OSM equipamientos');
 regSource('geo', 'Geocodificación');
 regSource('meteomapa', 'Viento/T mapa');
+regSource('fogospt', 'Fogos.pt (PT)');
 regSource('wms', 'Teselas WMS');
 regSource('pred', 'Predicción');
 setSource('pred', 'ok');
